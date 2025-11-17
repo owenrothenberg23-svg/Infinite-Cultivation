@@ -1,0 +1,18 @@
+/* Tailwind v4: import once, no @tailwind directives */
+@import "tailwindcss";
+
+/* Dark theme baseline */
+:root { color-scheme: dark; }
+
+html, body {
+  height: 100%;
+  background: #0B1220;   /* deep navy */
+  color: #E5E7EB;        /* gray-200-ish */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Optional: basic prose tweaks without @apply */
+.prose { color: #E5E7EB; }
+.prose :is(h1,h2,h3) { color: #fff; }
