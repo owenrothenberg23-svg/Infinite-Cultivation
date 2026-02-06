@@ -3,12 +3,16 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { supabaseServer } from "@/lib/supabase";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+function getOpenAI() {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("Missing OPENAI_API_KEY");
+  return new OpenAI({ apiKey: key });
+}
 
 export async function POST(req: Request) {
   try {
+    const openai = getOpenAI(); // ✅ lazy init (prevents build-time crash)
+
     const { storyId, prompt } = await req.json();
 
     // 0. Look up the story to find the author
@@ -29,20 +33,16 @@ export async function POST(req: Request) {
     const authorId = story.user_id as string;
 
     // 1. Figure out what chapter number this should be (for this story)
-    const { data: existingChapters, error: chaptersErr } =
-      await supabaseServer
-        .from("chapters")
-        .select("number")
-        .eq("story_id", storyId)
-        .order("number", { ascending: false })
-        .limit(1);
+    const { data: existingChapters, error: chaptersErr } = await supabaseServer
+      .from("chapters")
+      .select("number")
+      .eq("story_id", storyId)
+      .order("number", { ascending: false })
+      .limit(1);
 
     if (chaptersErr) {
       console.error("fetch chapters error:", chaptersErr);
-      return NextResponse.json(
-        { error: chaptersErr.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: chaptersErr.message }, { status: 500 });
     }
 
     const nextChapterNumber =
@@ -79,7 +79,7 @@ export async function POST(req: Request) {
           number: nextChapterNumber,
           title: `Chapter ${nextChapterNumber}`,
           text: chapterText,
-          summary: "", // we'll add summaries later for memory
+          summary: "",
         },
       ])
       .select("*")
@@ -87,35 +87,25 @@ export async function POST(req: Request) {
 
     if (insertErr) {
       console.error("insert chapter error:", insertErr);
-      return NextResponse.json(
-        { error: insertErr.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: insertErr.message }, { status: 500 });
     }
 
     // 4. After inserting, check if the author just hit 10 total chapters
     try {
-      // 4a. Find all stories for this author
-      const { data: authorStories, error: authorStoriesErr } =
-        await supabaseServer
-          .from("stories")
-          .select("id")
-          .eq("user_id", authorId);
+      const { data: authorStories, error: authorStoriesErr } = await supabaseServer
+        .from("stories")
+        .select("id")
+        .eq("user_id", authorId);
 
       if (authorStoriesErr) {
-        console.error(
-          "chapter: author stories lookup error:",
-          authorStoriesErr
-        );
+        console.error("chapter: author stories lookup error:", authorStoriesErr);
       } else if (authorStories && authorStories.length > 0) {
         const storyIds = authorStories.map((s) => s.id);
 
-        // 4b. Count all chapters across those stories
-        const { count: chapterCount, error: chapterCountErr } =
-          await supabaseServer
-            .from("chapters")
-            .select("id", { count: "exact", head: true })
-            .in("story_id", storyIds);
+        const { count: chapterCount, error: chapterCountErr } = await supabaseServer
+          .from("chapters")
+          .select("id", { count: "exact", head: true })
+          .in("story_id", storyIds);
 
         if (chapterCountErr) {
           console.error(
@@ -123,7 +113,6 @@ export async function POST(req: Request) {
             chapterCountErr
           );
         } else if (typeof chapterCount === "number" && chapterCount === 10) {
-          // 4c. Unlock "Wandering Storyteller" when they reach exactly 10 chapters
           const { data: titleRow, error: titleErr } = await supabaseServer
             .from("titles")
             .select("id")
@@ -138,7 +127,6 @@ export async function POST(req: Request) {
           } else {
             const wanderingTitleId = titleRow.id;
 
-            // Check if user already has it
             const { data: existingTitle, error: existingTitleErr } =
               await supabaseServer
                 .from("user_titles")
@@ -147,10 +135,7 @@ export async function POST(req: Request) {
                 .eq("title_id", wanderingTitleId)
                 .maybeSingle();
 
-            if (
-              existingTitleErr &&
-              existingTitleErr.code !== "PGRST116" // PGRST116 = no rows found
-            ) {
+            if (existingTitleErr && existingTitleErr.code !== "PGRST116") {
               console.error(
                 "chapter: existing wandering title check error:",
                 existingTitleErr
@@ -161,7 +146,7 @@ export async function POST(req: Request) {
                 .insert({
                   user_id: authorId,
                   title_id: wanderingTitleId,
-                  is_active: false, // let them equip it on /titles
+                  is_active: false,
                 });
 
               if (insertTitleErr) {
@@ -175,14 +160,13 @@ export async function POST(req: Request) {
         }
       }
     } catch (unlockErr) {
-      console.error("chapter: wandering storyteller unlock fatal error:", unlockErr);
-      // we don't block chapter creation on unlock failure
+      console.error(
+        "chapter: wandering storyteller unlock fatal error:",
+        unlockErr
+      );
     }
 
-    // 5. Return the saved chapter row
-    return NextResponse.json({
-      chapter: inserted,
-    });
+    return NextResponse.json({ chapter: inserted });
   } catch (err: any) {
     console.error("chapter route error:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

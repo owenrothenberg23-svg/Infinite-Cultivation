@@ -6,9 +6,11 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export const runtime = "nodejs";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
+function getAnthropic() {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("Missing ANTHROPIC_API_KEY");
+  return new Anthropic({ apiKey: key });
+}
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 
@@ -31,8 +33,8 @@ export async function POST(
 ): Promise<Response> {
   try {
     const supabase = getSupabaseServer();
+    const anthropic = getAnthropic(); // ✅ lazy init
 
-    // ✅ Next 16 typed routes: params is a Promise
     const { chapterId } = await context.params;
 
     const authHeader = request.headers.get("authorization") || "";
@@ -87,7 +89,11 @@ export async function POST(
 
     // (leave the rest of your existing logic below as-is)
     return NextResponse.json(
-      { ok: true, storyId: chapter.story_id, chapterNumber: chapter.chapter_number },
+      {
+        ok: true,
+        storyId: chapter.story_id,
+        chapterNumber: chapter.chapter_number,
+      },
       { status: 200 }
     );
   } catch (err: any) {
