@@ -1,5 +1,6 @@
 // app/api/chapters/[chapterId]/finalize/route.ts
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase";
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -11,7 +12,8 @@ const anthropic = new Anthropic({
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 
-const S = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
+const S = (v: unknown, d = ""): string =>
+  typeof v === "string" ? v : d;
 
 function atext(msg: any): string {
   const content = Array.isArray(msg?.content) ? msg.content : [];
@@ -25,54 +27,73 @@ function atext(msg: any): string {
 }
 
 export async function POST(
-  req: NextRequest,
-  context: { params: Promise<{ chapterId: string }> }
-) {
+  request: NextRequest,
+  context: { params: { chapterId: string } }
+): Promise<Response> {
   try {
     const supabase = getSupabaseServer();
-    const { chapterId } = await context.params;
+    const { chapterId } = context.params;
 
-    const authHeader = req.headers.get("authorization") || "";
+    const authHeader = request.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ")
       ? authHeader.slice("Bearer ".length)
       : "";
 
     if (!token) {
-      return new Response(JSON.stringify({ error: "Not logged in" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "Not logged in" }, { status: 401 });
     }
 
     const { data: userData } = await supabase.auth.getUser(token);
     if (!userData?.user) {
-      return new Response(JSON.stringify({ error: "Not logged in" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "Not logged in" }, { status: 401 });
     }
 
-    const body = await req.json().catch(() => ({} as any));
+    const body = await request.json().catch(() => ({}));
     const finalContent =
       typeof body?.final_content === "string" ? body.final_content.trim() : "";
 
-    if (!finalContent || finalContent.length < 100) {
-      return new Response(
-        JSON.stringify({ error: "Final content is too short." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+    if (finalContent.length < 100) {
+      return NextResponse.json(
+        { error: "Final content is too short" },
+        { status: 400 }
       );
     }
 
-    // ... (rest of your logic stays EXACTLY the same)
+    const { data: chapter } = await supabase
+      .from("chapters")
+      .select("id, story_id, chapter_number, is_final")
+      .eq("id", chapterId)
+      .single();
 
-    return new Response(
-      JSON.stringify({ ok: true, storyId: chapterId }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
+    if (!chapter || chapter.is_final) {
+      return NextResponse.json(
+        { error: "Invalid or already finalized chapter" },
+        { status: 400 }
+      );
+    }
+
+    await supabase
+      .from("chapters")
+      .update({
+        content: finalContent,
+        draft_content: null,
+        is_final: true,
+        finalized_at: new Date().toISOString(),
+      })
+      .eq("id", chapterId);
+
+    return NextResponse.json(
+      {
+        ok: true,
+        storyId: chapter.story_id,
+        chapterNumber: chapter.chapter_number,
+      },
+      { status: 200 }
     );
   } catch (err: any) {
-    return new Response(
-      JSON.stringify({ error: err?.message || "Unknown error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+    return NextResponse.json(
+      { error: err?.message || "Unknown error" },
+      { status: 500 }
     );
   }
 }
