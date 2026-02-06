@@ -12,8 +12,7 @@ const anthropic = new Anthropic({
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 
-const S = (v: unknown, d = ""): string =>
-  typeof v === "string" ? v : d;
+const S = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
 
 function atext(msg: any): string {
   const content = Array.isArray(msg?.content) ? msg.content : [];
@@ -28,11 +27,13 @@ function atext(msg: any): string {
 
 export async function POST(
   request: NextRequest,
-  context: { params: { chapterId: string } }
+  context: { params: Promise<{ chapterId: string }> }
 ): Promise<Response> {
   try {
     const supabase = getSupabaseServer();
-    const { chapterId } = context.params;
+
+    // ✅ Next 16 typed routes: params is a Promise
+    const { chapterId } = await context.params;
 
     const authHeader = request.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ")
@@ -50,7 +51,9 @@ export async function POST(
 
     const body = await request.json().catch(() => ({}));
     const finalContent =
-      typeof body?.final_content === "string" ? body.final_content.trim() : "";
+      typeof (body as any)?.final_content === "string"
+        ? (body as any).final_content.trim()
+        : "";
 
     if (finalContent.length < 100) {
       return NextResponse.json(
@@ -82,12 +85,9 @@ export async function POST(
       })
       .eq("id", chapterId);
 
+    // (leave the rest of your existing logic below as-is)
     return NextResponse.json(
-      {
-        ok: true,
-        storyId: chapter.story_id,
-        chapterNumber: chapter.chapter_number,
-      },
+      { ok: true, storyId: chapter.story_id, chapterNumber: chapter.chapter_number },
       { status: 200 }
     );
   } catch (err: any) {
