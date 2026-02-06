@@ -11,20 +11,25 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 /**
  * 1) RLS client for API route handlers that forward Authorization headers.
- *    (Useful once you add auth; safe to keep now.)
+ *    Use this when you want Supabase Auth + RLS to apply.
+ *
+ *    IMPORTANT:
+ *    - This reads the incoming request's Authorization header.
+ *    - It does NOT use cookies (no cookie adapters / no cookie writing).
  */
 export async function supabaseRLSFromAuthHeader() {
-  const h = await nextHeaders(); // ✅ in Next 16 this can be a Promise
-  const auth = h.get("authorization") || undefined;
+  // In Next 16, headers() can be a Promise.
+  const h = await nextHeaders();
+  const auth = h.get("authorization") || "";
 
   return createClient(SUPABASE_URL, ANON_KEY, {
+    auth: { persistSession: false },
     global: auth ? { headers: { Authorization: auth } } : {},
   });
 }
 
 /**
  * 2) Admin client (bypasses RLS). Use ONLY in server code (route handlers).
- *    This is what your existing code was using.
  */
 export function supabaseAdmin() {
   return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -34,21 +39,13 @@ export function supabaseAdmin() {
 
 /**
  * 3) Back-compat export so existing imports keep working.
- *    (Your routes/pages are importing { supabaseServer } today.)
  */
 export const supabaseServer = supabaseAdmin();
 
 /**
- * 4) Optional convenience if you want a named getter instead.
+ * 4) Convenience getter (SYNC on purpose).
+ *    This prevents "Promise<...>" type explosions in your routes.
  */
 export function getSupabaseServer() {
   return supabaseServer;
-}
-// add to lib/supabase.ts (below current exports)
-export function supabaseBrowser() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: true } }
-  );
 }
