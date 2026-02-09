@@ -2,6 +2,7 @@
 "use client";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 import { useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -10,26 +11,22 @@ import { supabaseBrowser } from "@/lib/supabaseBrowser";
 export default function LoginCallbackPage() {
   const router = useRouter();
   const params = useSearchParams();
-
-  const ranRef = useRef(false);
+  const ran = useRef(false);
 
   useEffect(() => {
-    if (ranRef.current) return;
-    ranRef.current = true;
+    if (ran.current) return;
+    ran.current = true;
 
     (async () => {
-      const sb = supabaseBrowser(); // ✅ create only in the browser effect
+      const sb = supabaseBrowser();
 
-      // If it's an OAuth flow (?code=...), exchange it
-      const hasCode = !!params.get("code");
-      if (hasCode) {
+      const code = params.get("code");
+      if (code) {
         await sb.auth.exchangeCodeForSession(window.location.href);
       }
 
-      // In either case, once a session exists, head to dashboard
       const { data } = await sb.auth.getSession();
-      if (data.session) router.replace("/dashboard");
-      else router.replace("/login"); // fallback
+      router.replace(data.session ? "/dashboard" : "/login");
     })();
   }, [params, router]);
 
