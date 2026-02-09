@@ -1,5 +1,9 @@
+// middleware.ts
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+
+const BETA_GATE_ON = process.env.BETA_GATE === "true";
+const OWNER_EMAIL = (process.env.BETA_OWNER_EMAIL || "").trim().toLowerCase();
 
 function isPublicPath(pathname: string) {
   if (pathname === "/") return true;
@@ -7,75 +11,77 @@ function isPublicPath(pathname: string) {
   if (pathname.startsWith("/beta")) return true;
   if (pathname.startsWith("/_next/")) return true;
   if (pathname === "/favicon.ico") return true;
-  if (pathname.startsWith("/api/")) return true; // never redirect APIs
+  if (pathname.startsWith("/api/")) return true; // never gate API via middleware
   return false;
 }
 
 export async function middleware(req: NextRequest) {
-  // ✅ Read env INSIDE middleware (runtime), not module scope
-  const BETA_GATE_ON = process.env.BETA_GATE === "true";
-  const OWNER_EMAIL = (process.env.BETA_OWNER_EMAIL || "").trim().toLowerCase();
-
-  const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
-  const SUPABASE_ANON = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").trim();
-
-  // ✅ Critical: never crash the whole site if env is missing
-  if (!SUPABASE_URL || !SUPABASE_ANON) {
-    return NextResponse.next();
-  }
-
+  const res = NextResponse.next();
   const { pathname, search } = req.nextUrl;
 
-  // Public paths bypass
-  if (isPublicPath(pathname)) return NextResponse.next();
+  // Always allow public paths
+  if (isPublicPath(pathname)) return res;
 
-  let res = NextResponse.next({ request: { headers: req.headers } });
-
-  const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON, {
-    cookies: {
-      getAll: () => req.cookies.getAll(),
-      setAll: (cookiesToSet) => {
-        for (const { name, value, options } of cookiesToSet) {
-          res.cookies.set(name, value, options);
-        }
-      },
-    },
-  });
-
-  // Keep session fresh
-  const { data: userData } = await supabase.auth.getUser();
-  const user = userData?.user ?? null;
-
-  // If gate is off, just keep refresh behavior
-  if (!BETA_GATE_ON) return res;
-
-  // If not logged in, send to login with "next"
-  if (!user) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("next", pathname + (search || ""));
-    return NextResponse.redirect(url);
+  // If env is missing, DO NOT crash the whole site
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) {
+    console.error("middleware: missing supabase env", {
+      hasUrl: !!url,
+      hasAnon: !!anon,
+    });
+    return res; // fail-open
   }
 
-  const email = (user.email || "").trim().toLowerCase();
+  try {
+    const supabase = createServerClient(url, anon, {
+      cookies: {
+        getAll: () => req.cookies.getAll(),
+        setAll: (cookiesToSet) => {
+          for (const { name, value, options } of cookiesToSet) {
+            res.cookies.set(name, value, options);
+          }
+        },
+      },
+    });
 
-  // Owner bypass
-  if (OWNER_EMAIL && email === OWNER_EMAIL) return res;
+    // Refresh session
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    const user = userData?.user ?? null;
 
-  // Allowlist check
-  const { data: row } = await supabase
-    .from("beta_allowlist")
-    .select("email")
-    .eq("email", email)
-    .maybeSingle();
+    // If beta gate is off, just return (still refreshed cookies)
+    if (!BETA_GATE_ON) return res;
 
-  if (row?.email) return res;
+    // Not logged in -> go to login
+    if (userErr || !user) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("next", pathname + (search || ""));
+      return NextResponse.redirect(url);
+    }
 
-  // Logged in but not allowlisted => go to /beta
-  const url = req.nextUrl.clone();
-  url.pathname = "/beta";
-  url.search = "";
-  return NextResponse.redirect(url);
+    const email = (user.email || "").trim().toLowerCase();
+
+    // Owner bypass
+    if (OWNER_EMAIL && email === OWNER_EMAIL) return res;
+
+    // Allowlist check (if this errors, fail-open instead of 500)
+    const { data: row, error } = await supabase
+      .from("beta_allowlist")
+      .select("email")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (!error && row?.email) return res;
+
+    const url2 = req.nextUrl.clone();
+    url2.pathname = "/beta";
+    url2.search = "";
+    return NextResponse.redirect(url2);
+  } catch (e) {
+    console.error("middleware fatal (fail-open):", e);
+    return res; // fail-open prevents 500 site-wide
+  }
 }
 
 export const config = {
