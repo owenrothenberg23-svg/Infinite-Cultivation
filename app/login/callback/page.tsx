@@ -1,17 +1,25 @@
 // app/login/callback/page.tsx
 "use client";
 
-import { useEffect } from "react";
+export const dynamic = "force-dynamic";
+
+import { useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
 export default function LoginCallbackPage() {
-  const sb = supabaseBrowser();
   const router = useRouter();
   const params = useSearchParams();
 
+  const ranRef = useRef(false);
+
   useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+
     (async () => {
+      const sb = supabaseBrowser(); // ✅ create only in the browser effect
+
       // If it's an OAuth flow (?code=...), exchange it
       const hasCode = !!params.get("code");
       if (hasCode) {
@@ -23,7 +31,7 @@ export default function LoginCallbackPage() {
       if (data.session) router.replace("/dashboard");
       else router.replace("/login"); // fallback
     })();
-  }, [params, router, sb]);
+  }, [params, router]);
 
   return (
     <main className="max-w-md mx-auto p-8 text-gray-200">
