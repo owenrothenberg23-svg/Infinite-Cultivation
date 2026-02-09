@@ -1,51 +1,58 @@
 // lib/supabase.ts
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { headers as nextHeaders } from "next/headers";
 
-/**
- * Env
- */
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+function requireEnv(name: string) {
+  const v = process.env[name]?.trim();
+  if (!v) throw new Error(`Missing ${name}`);
+  return v;
+}
+
+function getSupabaseUrl() {
+  return requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+}
+function getAnonKey() {
+  return requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+}
+function getServiceRoleKey() {
+  return requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+}
 
 /**
- * 1) RLS client for API route handlers that forward Authorization headers.
- *    Use this when you want Supabase Auth + RLS to apply.
- *
- *    IMPORTANT:
- *    - This reads the incoming request's Authorization header.
- *    - It does NOT use cookies (no cookie adapters / no cookie writing).
+ * 1) RLS client for API routes that forward Authorization headers.
  */
 export async function supabaseRLSFromAuthHeader() {
-  // In Next 16, headers() can be a Promise.
   const h = await nextHeaders();
   const auth = h.get("authorization") || "";
 
-  return createClient(SUPABASE_URL, ANON_KEY, {
+  return createClient(getSupabaseUrl(), getAnonKey(), {
     auth: { persistSession: false },
     global: auth ? { headers: { Authorization: auth } } : {},
   });
 }
 
 /**
- * 2) Admin client (bypasses RLS). Use ONLY in server code (route handlers).
+ * 2) Admin client (bypasses RLS).
  */
 export function supabaseAdmin() {
-  return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  return createClient(getSupabaseUrl(), getServiceRoleKey(), {
     auth: { persistSession: false },
   });
 }
 
 /**
- * 3) Back-compat export so existing imports keep working.
+ * 3) Back-compat export (but make it lazy).
  */
-export const supabaseServer = supabaseAdmin();
-
-/**
- * 4) Convenience getter (SYNC on purpose).
- *    This prevents "Promise<...>" type explosions in your routes.
- */
+let _admin: SupabaseClient | null = null;
 export function getSupabaseServer() {
-  return supabaseServer;
+  if (!_admin) _admin = supabaseAdmin();
+  return _admin;
 }
+
+// If you still import supabaseServer in old routes, keep this:
+export const supabaseServer = {
+  get from() {
+    // not used; just prevents accidental usage
+    throw new Error("Use getSupabaseServer() instead of supabaseServer directly.");
+  },
+} as any;

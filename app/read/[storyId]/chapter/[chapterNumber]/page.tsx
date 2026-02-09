@@ -1,8 +1,8 @@
+// app/read/[storyId]/chapter/[chapterNumber]/page.tsx
 import Link from "next/link";
 import { supabaseServer } from "@/lib/supabase";
 import GenerateButton from "@/components/GenerateButton";
 import ChapterEditor from "@/components/ChapterEditor";
-import CopyLinkButton from "@/components/CopyLinkButton";
 
 type Params = { storyId: string; chapterNumber: string };
 
@@ -20,8 +20,13 @@ export default async function ChapterPage({
     return (
       <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-4">
         <h1 className="text-2xl font-bold">Invalid chapter</h1>
-        <p className="text-gray-400">That chapter number doesn’t look right.</p>
-        <Link href={`/read/${storyId}`} className="text-indigo-400 hover:underline">
+        <p className="text-gray-400">
+          That chapter number doesn’t look right.
+        </p>
+        <Link
+          href={`/read/${storyId}`}
+          className="text-indigo-400 hover:underline"
+        >
           ← Back to story
         </Link>
       </main>
@@ -78,11 +83,6 @@ export default async function ChapterPage({
 
   const isLastChapter = chapterNum === (story.last_chapter_number ?? 0);
 
-  // ✅ Progress info (UI-only)
-  const total = Math.max(1, Number(story.last_chapter_number ?? chapterNum));
-  const current = Math.min(Math.max(1, chapterNum), total);
-  const pct = Math.round((current / total) * 100);
-
   // Friendly missing-chapter state
   if (!chapter) {
     const last = story.last_chapter_number ?? 0;
@@ -95,7 +95,9 @@ export default async function ChapterPage({
         </div>
 
         <div className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <p className="text-gray-200 font-medium">This chapter hasn’t manifested yet.</p>
+          <p className="text-gray-200 font-medium">
+            This chapter hasn’t manifested yet.
+          </p>
           <p className="text-sm text-gray-400 mt-1">
             It may not exist, or it hasn’t been generated/published.
           </p>
@@ -127,47 +129,26 @@ export default async function ChapterPage({
       <div className="mb-4 flex items-center justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-3xl font-bold">{story.title}</h1>
-          <Link href={`/read/${storyId}`} className="text-sm text-indigo-400 hover:underline">
+          <Link
+            href={`/read/${storyId}`}
+            className="text-sm text-indigo-400 hover:underline"
+          >
             ← Back to story
           </Link>
         </div>
       </div>
 
       <article className="prose prose-invert">
-        {/* ✅ Title row + progress + copy link (additive only) */}
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <h2 className="text-2xl font-semibold mb-1">
-              {chapter.title || `Chapter ${chapterNum}`}
-            </h2>
-
-            <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
-              <span>
-                Chapter <span className="text-gray-200">{current}</span> of{" "}
-                <span className="text-gray-200">{total}</span>
-              </span>
-              <span className="text-gray-600">•</span>
-              <span>{pct}% through</span>
-            </div>
-
-            <div className="mt-2 h-1.5 w-full max-w-sm rounded-full bg-white/10">
-              <div
-                className="h-1.5 rounded-full bg-indigo-500"
-                style={{ width: `${pct}%` }}
-                aria-label={`Progress ${pct}%`}
-              />
-            </div>
-          </div>
-
-          <div className="shrink-0">
-            <CopyLinkButton />
-          </div>
-        </div>
+        <h2 className="text-2xl font-semibold mb-2">
+          {chapter.title || `Chapter ${chapterNum}`}
+        </h2>
 
         {chapterText.trim().length > 0 ? (
           <div className="whitespace-pre-wrap leading-relaxed">{chapterText}</div>
         ) : (
-          <p className="text-gray-400">This chapter has no content yet.</p>
+          <p className="text-gray-400">
+            This chapter has no content yet.
+          </p>
         )}
       </article>
 
@@ -178,7 +159,7 @@ export default async function ChapterPage({
           <p className="text-gray-400 text-sm">No continuity notes yet.</p>
         ) : (
           <div className="grid sm:grid-cols-2 gap-3">
-            {mems.map((m, i) => (
+            {mems.map((m: any, i: number) => (
               <div key={i} className="rounded-lg bg-white/5 p-3">
                 <div className="text-xs uppercase tracking-wide text-indigo-300">
                   {(m.kind ?? "note")} · ch {m.chapter_number}
@@ -201,7 +182,10 @@ export default async function ChapterPage({
       <nav className="flex items-center justify-between mt-8">
         <div>
           {prev ? (
-            <Link href={`/read/${storyId}/chapter/${prev}`} className="text-gray-300 hover:text-white">
+            <Link
+              href={`/read/${storyId}/chapter/${prev}`}
+              className="text-gray-300 hover:text-white"
+            >
               ← Previous
             </Link>
           ) : (
@@ -211,7 +195,10 @@ export default async function ChapterPage({
 
         <div>
           {next ? (
-            <Link href={`/read/${storyId}/chapter/${next}`} className="text-gray-300 hover:text-white">
+            <Link
+              href={`/read/${storyId}/chapter/${next}`}
+              className="text-gray-300 hover:text-white"
+            >
               Next →
             </Link>
           ) : (
@@ -224,7 +211,10 @@ export default async function ChapterPage({
       {isLastChapter && (
         <section className="mt-10 border-t border-white/10 pt-6">
           <h3 className="text-lg font-semibold mb-3">Continue the saga</h3>
-          <GenerateButton storyId={storyId} nextNumber={(story.last_chapter_number ?? 0) + 1} />
+          <GenerateButton
+            storyId={storyId}
+            nextNumber={(story.last_chapter_number ?? 0) + 1}
+          />
         </section>
       )}
     </main>

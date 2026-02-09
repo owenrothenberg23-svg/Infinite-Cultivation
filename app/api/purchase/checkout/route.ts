@@ -5,7 +5,11 @@ import { getSupabaseServer } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {});
+function getStripe() {
+  const key = process.env.STRIPE_SECRET_KEY?.trim();
+  if (!key) throw new Error("Missing STRIPE_SECRET_KEY");
+  return new Stripe(key, { });
+}
 
 function firstEnv(...keys: string[]) {
   for (const k of keys) {
@@ -41,8 +45,18 @@ function priceIdForPack(packId: string): string | undefined {
   }
 }
 
+function getBaseUrl() {
+  // Prefer explicit site URL. Fallback to Vercel-provided URL.
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (explicit) return explicit;
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel}`;
+  return "http://localhost:3000";
+}
+
 export async function POST(req: Request) {
   try {
+    const stripe = getStripe(); // ✅ lazy init prevents build-time crash
     const supabase = getSupabaseServer();
 
     const authHeader = req.headers.get("authorization") || "";
@@ -65,13 +79,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ NEW: Closed beta allowlist check
     const emailLower = userData.user.email?.toLowerCase().trim();
     if (!emailLower) {
-      return NextResponse.json(
-        { error: "Account email missing." },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Account email missing." }, { status: 401 });
     }
 
     const { data: allow } = await supabase
@@ -104,7 +114,7 @@ export async function POST(req: Request) {
         {
           error:
             `Missing Stripe price id for pack '${packId}'. ` +
-            `Check .env.local has the right var set (old or new naming).`,
+            `Set the STRIPE_PRICE_ID_* env vars on Vercel.`,
           packId,
         },
         { status: 500 }
@@ -135,8 +145,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const baseUrl =
-      process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000";
+    const baseUrl = getBaseUrl();
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",

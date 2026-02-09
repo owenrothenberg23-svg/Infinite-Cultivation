@@ -111,7 +111,7 @@ export default async function StoryPage({
 
         <ul className="space-y-2">
           {hasChapters ? (
-            chapters!.map((ch) => (
+            chapters!.map((ch: any) => (
               <li key={ch.id}>
                 <Link
                   href={`/read/${storyId}/chapter/${ch.chapter_number}`}
