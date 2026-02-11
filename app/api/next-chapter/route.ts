@@ -5,10 +5,6 @@ import { getSupabaseServer } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
-
 // model
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 
@@ -47,7 +43,7 @@ function atext(msg: any): string {
   return out.join("\n").trim();
 }
 
-async function ensureModelAvailable() {
+async function ensureModelAvailable(anthropic: Anthropic) {
   try {
     await anthropic.messages.create({
       model: MODEL,
@@ -63,9 +59,12 @@ async function ensureModelAvailable() {
 }
 
 export async function POST(req: Request) {
-  try {
-    const supabase = getSupabaseServer();
+  const supabase = getSupabaseServer();
 
+  let charged = false;
+  let userIdForRefund: string | null = null;
+
+  try {
     // ---------- KILL SWITCH ----------
     if (GENERATION_DISABLED) {
       return NextResponse.json(
@@ -99,7 +98,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ NEW: Closed beta allowlist check
+    // ✅ Closed beta allowlist check
     const email = userData.user.email?.toLowerCase().trim();
     if (!email) {
       return NextResponse.json(
@@ -122,6 +121,7 @@ export async function POST(req: Request) {
     }
 
     const userId = userData.user.id;
+    userIdForRefund = userId;
 
     // ---------- Extract storyId ----------
     const ctype = (req.headers.get("content-type") || "").toLowerCase();
@@ -145,35 +145,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing storyId" }, { status: 400 });
     }
 
-    // ---------- Check model availability ----------
-    try {
-      await ensureModelAvailable();
-    } catch (e: any) {
-      return NextResponse.json({ error: e?.message }, { status: 400 });
-    }
-
-    // ---------- Load Stone balance (REQUIRED) ----------
-    const { data: profile, error: profErr } = await supabase
-      .from("profiles")
-      .select("spirit_stones")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profErr) {
-      console.error("next-chapter: profile load error", profErr);
+    // ---------- Anthropic client (lazy init, avoids import-time crash) ----------
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
       return NextResponse.json(
-        { error: "Could not load your Spirit Stones" },
+        { error: "Anthropic API key missing." },
         { status: 500 }
       );
     }
+    const anthropic = new Anthropic({ apiKey });
 
-    const prevStones = profile?.spirit_stones ?? 0;
-
-    if (prevStones < 1) {
-      return NextResponse.json(
-        { error: "Not enough Spirit Stones" },
-        { status: 402 }
-      );
+    // ---------- Check model availability ----------
+    try {
+      await ensureModelAvailable(anthropic);
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message }, { status: 400 });
     }
 
     // ---------- Load story (AND verify ownership) ----------
@@ -232,6 +218,20 @@ export async function POST(req: Request) {
     } catch (e) {
       console.warn("cap check failed (non-fatal)", e);
     }
+
+    // ---------- Atomic charge: 1 Spirit Stone ----------
+    const { data: ok, error: decErr } = await supabase.rpc(
+      "decrement_spirit_stones",
+      { p_user_id: userId, p_amount: 1 }
+    );
+
+    if (decErr || !ok) {
+      return NextResponse.json(
+        { error: "Not enough Spirit Stones" },
+        { status: 402 }
+      );
+    }
+    charged = true;
 
     // ---------- Recent chapters ----------
     const { data: recentChapters } = await supabase
@@ -365,9 +365,7 @@ export async function POST(req: Request) {
       "- Maintain continuity using memory + recent chapters.",
       "- Keep names/items/sects consistent.",
       "- End chapter with a hook.",
-      wantsSystem
-        ? "- MUST include at least one in-world [SYSTEM] panel/prompt."
-        : "",
+      wantsSystem ? "- MUST include at least one in-world [SYSTEM] panel/prompt." : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -495,8 +493,17 @@ export async function POST(req: Request) {
       content = content.slice(0, MAX_CHAPTER_CHARS).trim();
     }
 
-    // ✅ NEW: Prevent empty / unusable chapters (server-side)
+    // Prevent empty chapters
     if (!content || content.trim().length < 50) {
+      // refund if generation produced garbage
+      if (charged) {
+        await supabase.rpc("increment_spirit_stones", {
+          p_user_id: userId,
+          p_amount: 1,
+        });
+        charged = false;
+      }
+
       return NextResponse.json(
         { error: "Generation failed to produce usable chapter text. Please try again." },
         { status: 502 }
@@ -518,20 +525,19 @@ export async function POST(req: Request) {
       .single();
 
     if (insertErr || !inserted) {
+      // refund if insert fails
+      if (charged) {
+        await supabase.rpc("increment_spirit_stones", {
+          p_user_id: userId,
+          p_amount: 1,
+        });
+        charged = false;
+      }
+
       return NextResponse.json(
         { error: insertErr?.message || "Insert failed" },
         { status: 500 }
       );
-    }
-
-    // ---------- Deduct stones ----------
-    try {
-      await supabase
-        .from("profiles")
-        .update({ spirit_stones: Math.max(prevStones - 1, 0) })
-        .eq("id", userId);
-    } catch (e) {
-      console.warn("charge failed (non-fatal)", e);
     }
 
     // ---------- Bump last_chapter_number ----------
@@ -542,6 +548,16 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ chapter: inserted }, { status: 200 });
   } catch (err: any) {
+    // best-effort refund on unexpected crash
+    if (charged && userIdForRefund) {
+      try {
+        await supabase.rpc("increment_spirit_stones", {
+          p_user_id: userIdForRefund,
+          p_amount: 1,
+        });
+      } catch {}
+    }
+
     return NextResponse.json(
       { error: err?.message || "Unknown error" },
       { status: 500 }

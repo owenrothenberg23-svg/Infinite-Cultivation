@@ -15,7 +15,6 @@ const PACK_STONES: Record<string, number> = {
 
 function isDuplicateKey(err: any) {
   const msg = String(err?.message || "");
-  // Postgres unique violation is 23505; Supabase often includes it in message
   return msg.includes("23505") || msg.toLowerCase().includes("duplicate key");
 }
 
@@ -42,7 +41,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
     }
 
-    // Only process these (you can add more later)
     const isCheckoutSuccess =
       event.type === "checkout.session.completed" ||
       event.type === "checkout.session.async_payment_succeeded";
@@ -53,7 +51,6 @@ export async function POST(req: Request) {
 
     const session = event.data.object as any;
 
-    // Only credit when actually paid
     const paymentStatus = session.payment_status;
     if (paymentStatus !== "paid") {
       console.log("webhook: not paid, skipping", {
@@ -64,12 +61,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true }, { status: 200 });
     }
 
-    // Identify userId + packId from best sources
+    // Identify userId + packId
     let userId: string | undefined =
       session?.metadata?.userId || session?.client_reference_id || undefined;
     let packId: string | undefined = session?.metadata?.packId || undefined;
 
-    // Fallback: PaymentIntent metadata
     const paymentIntentId: string | undefined =
       typeof session.payment_intent === "string"
         ? session.payment_intent
@@ -122,69 +118,52 @@ export async function POST(req: Request) {
         return NextResponse.json({ received: true }, { status: 200 });
       }
       console.error("webhook: failed to insert stripe_events row", evErr);
-      // Still return 200 so Stripe doesn't hammer you; but log hard
       return NextResponse.json({ received: true }, { status: 200 });
     }
 
-    // ✅ 2) Credit stones
-    const { data: profile, error: profErr } = await supabase
-      .from("profiles")
-      .select("spirit_stones")
-      .eq("id", userId)
-      .maybeSingle();
+    // ✅ 2) Credit stones ATOMICALLY (no select + overwrite)
+    const { error: incErr } = await supabase.rpc("increment_spirit_stones", {
+      p_user_id: userId,
+      p_amount: stones,
+    });
 
-    if (profErr) {
-      console.error("webhook: profile load error", profErr);
+    if (incErr) {
+      console.error("webhook: increment_spirit_stones error", incErr);
       return NextResponse.json({ received: true }, { status: 200 });
     }
 
-    const prev = profile?.spirit_stones ?? 0;
-    const newBalance = prev + stones;
+    console.log("webhook: credited stones", {
+      userId,
+      packId,
+      stones,
+      eventId: event.id,
+    });
 
-    const { error: updErr } = await supabase
-      .from("profiles")
-      .update({ spirit_stones: newBalance })
-      .eq("id", userId);
-
-    if (updErr) {
-      console.error("webhook: profile update error", updErr);
-    } else {
-      console.log("webhook: credited stones", {
-        userId,
-        packId,
+    // ✅ 3) Log purchase (unchanged) — only after successful credit
+    try {
+      const { error: purchaseErr } = await supabase.from("purchases").insert({
+        user_id: userId,
+        pack_id: packId,
         stones,
-        newBalance,
-        eventId: event.id,
+        amount_total: session?.amount_total ?? null,
+        currency: session?.currency ?? null,
+        stripe_session_id: session?.id ?? null,
+        stripe_payment_intent_id: paymentIntentId ?? null,
+        stripe_event_id: event.id,
       });
 
-      // ✅ 3) Log purchase (Step 2.2) — only after successful credit
-      try {
-        const { error: purchaseErr } = await supabase.from("purchases").insert({
-          user_id: userId,
-          pack_id: packId,
-          stones,
-          amount_total: session?.amount_total ?? null,
-          currency: session?.currency ?? null,
-          stripe_session_id: session?.id ?? null,
-          stripe_payment_intent_id: paymentIntentId ?? null,
-          stripe_event_id: event.id,
-        });
-
-        if (purchaseErr) {
-          // If your purchases table has a unique constraint on stripe_event_id,
-          // duplicates here are also safe to ignore.
-          if (isDuplicateKey(purchaseErr)) {
-            console.log("webhook: purchase already logged", {
-              eventId: event.id,
-              sessionId: session?.id,
-            });
-          } else {
-            console.warn("webhook: purchase insert error (non-fatal)", purchaseErr);
-          }
+      if (purchaseErr) {
+        if (isDuplicateKey(purchaseErr)) {
+          console.log("webhook: purchase already logged", {
+            eventId: event.id,
+            sessionId: session?.id,
+          });
+        } else {
+          console.warn("webhook: purchase insert error (non-fatal)", purchaseErr);
         }
-      } catch (e) {
-        console.warn("webhook: purchase insert threw (non-fatal)", e);
       }
+    } catch (e) {
+      console.warn("webhook: purchase insert threw (non-fatal)", e);
     }
 
     return NextResponse.json({ received: true }, { status: 200 });
