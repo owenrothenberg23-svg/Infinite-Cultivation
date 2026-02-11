@@ -2,21 +2,28 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
+// In proxy mode, this file is the entrypoint. Do NOT also have middleware.ts.
+
 const BETA_GATE_ON = process.env.BETA_GATE === "true";
 const OWNER_EMAIL = (process.env.BETA_OWNER_EMAIL || "").trim().toLowerCase();
 
+function isAsset(pathname: string) {
+  // Anything with a file extension should be treated as public
+  return /\.[a-zA-Z0-9]+$/.test(pathname);
+}
+
 function isPublicPath(pathname: string) {
-  // Home + login always public
+  // Home + auth pages
   if (pathname === "/") return true;
   if (pathname === "/login" || pathname.startsWith("/login/")) return true;
 
-  // IMPORTANT: beta page public (both /beta and /beta/ and nested)
+  // IMPORTANT: allow both /beta and /beta/ and any nested beta routes
   if (pathname === "/beta" || pathname.startsWith("/beta/")) return true;
 
-  // Always allow Next internals + assets
+  // Next internals + assets
   if (pathname.startsWith("/_next/")) return true;
   if (pathname === "/favicon.ico") return true;
-  if (pathname.match(/\.(.*)$/)) return true; // .png .svg .css .js etc
+  if (isAsset(pathname)) return true;
 
   // Never gate API routes
   if (pathname.startsWith("/api/")) return true;
@@ -24,12 +31,19 @@ function isPublicPath(pathname: string) {
   return false;
 }
 
-export async function proxy(req: NextRequest) {
+/**
+ * Next.js "middleware-to-proxy" expects:
+ * export default function middleware(req) or export function middleware(req)
+ * but in proxy mode, Next picks up proxy.ts directly.
+ *
+ * The error you saw confirms proxy.ts is the intended entrypoint in your setup.
+ */
+export default async function middleware(req: NextRequest) {
   try {
     const { pathname, search } = req.nextUrl;
 
-    // Always pass through public paths with NO auth refresh
-    // (prevents edge cookie churn / redirect loops)
+    // If beta gate is off OR path is public: pass through WITHOUT touching auth.
+    // (Avoids cookie refresh + redirect normalization loops in production.)
     if (!BETA_GATE_ON || isPublicPath(pathname)) {
       return NextResponse.next();
     }
@@ -41,7 +55,7 @@ export async function proxy(req: NextRequest) {
     if (!supaUrl || !anon) return NextResponse.next();
 
     // Create a response we can attach cookies to
-    let res = NextResponse.next({ request: { headers: req.headers } });
+    const res = NextResponse.next({ request: { headers: req.headers } });
 
     // Create Supabase server client with cookie passthrough + ability to set cookies
     const supabase = createServerClient(supaUrl, anon, {
@@ -55,7 +69,7 @@ export async function proxy(req: NextRequest) {
       },
     });
 
-    // Get user (also refreshes if needed)
+    // Get user (may refresh cookies)
     const { data } = await supabase.auth.getUser();
     const user = data?.user ?? null;
 
@@ -81,7 +95,7 @@ export async function proxy(req: NextRequest) {
 
     if (!error && row?.email) return res;
 
-    // Logged in but not allowlisted => send to /beta (no search params)
+    // Logged in but not allowlisted => send to /beta (no query)
     const u = req.nextUrl.clone();
     u.pathname = "/beta";
     u.search = "";
@@ -92,6 +106,7 @@ export async function proxy(req: NextRequest) {
   }
 }
 
+// Keep matcher broad but exclude Next static/image
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image).*)"],
 };
