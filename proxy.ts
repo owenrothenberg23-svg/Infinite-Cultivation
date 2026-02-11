@@ -17,7 +17,7 @@ function isPublicPath(pathname: string) {
   if (pathname === "/") return true;
   if (pathname === "/login" || pathname.startsWith("/login/")) return true;
 
-  // IMPORTANT: allow both /beta and /beta/ and any nested beta routes
+  // Beta page must be public (both /beta and /beta/ and nested)
   if (pathname === "/beta" || pathname.startsWith("/beta/")) return true;
 
   // Next internals + assets
@@ -25,22 +25,17 @@ function isPublicPath(pathname: string) {
   if (pathname === "/favicon.ico") return true;
   if (isAsset(pathname)) return true;
 
-  // Never gate API routes
-  if (pathname.startsWith("/api/")) return true;
-
   return false;
 }
 
-/**
- * Next.js "middleware-to-proxy" expects:
- * export default function middleware(req) or export function middleware(req)
- * but in proxy mode, Next picks up proxy.ts directly.
- *
- * The error you saw confirms proxy.ts is the intended entrypoint in your setup.
- */
 export default async function middleware(req: NextRequest) {
   try {
     const { pathname, search } = req.nextUrl;
+
+    // Allow Stripe webhook publicly (Stripe cannot be gated)
+    if (pathname === "/api/stripe/webhook") {
+      return NextResponse.next();
+    }
 
     // If beta gate is off OR path is public: pass through WITHOUT touching auth.
     // (Avoids cookie refresh + redirect normalization loops in production.)
@@ -106,7 +101,7 @@ export default async function middleware(req: NextRequest) {
   }
 }
 
-// Keep matcher broad but exclude Next static/image
+// Keep matcher broad but exclude Next internals
 export const config = {
   matcher: ["/((?!_next/static|_next/image).*)"],
 };
