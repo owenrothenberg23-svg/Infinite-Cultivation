@@ -1,5 +1,4 @@
 // proxy.ts
-import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 const BETA_GATE_ON = process.env.BETA_GATE === "true";
@@ -11,75 +10,70 @@ function isPublicPath(pathname: string) {
   if (pathname.startsWith("/beta")) return true;
   if (pathname.startsWith("/_next/")) return true;
   if (pathname === "/favicon.ico") return true;
-  if (pathname.startsWith("/api/")) return true; // never gate APIs here
+  if (pathname.startsWith("/api/")) return true;
   return false;
 }
 
-export async function proxy(req: NextRequest) {
+export async function proxy(req: Request) {
   try {
-    // If env vars are missing in prod, don't take the whole site down.
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url || !anon) return NextResponse.next();
 
-    let res = NextResponse.next({ request: { headers: req.headers } });
+    // Fail open if env missing
+    if (!supaUrl || !anon) return fetch(req);
 
-    const supabase = createServerClient(url, anon, {
+    const url = new URL(req.url);
+
+    // Gate off or public paths => just forward
+    if (!BETA_GATE_ON || isPublicPath(url.pathname)) return fetch(req);
+
+    // Read cookies from header
+    const cookieHeader = req.headers.get("cookie") || "";
+
+    const supabase = createServerClient(supaUrl, anon, {
       cookies: {
-        getAll: () => req.cookies.getAll(),
-        setAll: (cookiesToSet) => {
-          for (const { name, value, options } of cookiesToSet) {
-            res.cookies.set(name, value, options);
-          }
+        getAll: () => {
+          return cookieHeader
+            .split(";")
+            .map((c) => c.trim())
+            .filter(Boolean)
+            .map((pair) => {
+              const idx = pair.indexOf("=");
+              const name = idx >= 0 ? pair.slice(0, idx) : pair;
+              const value = idx >= 0 ? pair.slice(idx + 1) : "";
+              return { name, value };
+            });
+        },
+        setAll: () => {
+          // NOTE: proxy doesn't automatically write Set-Cookie like middleware.
+          // We'll skip refresh behavior here.
         },
       },
     });
 
-    // Refresh session (non-fatal)
-    const { data: userData } = await supabase.auth.getUser();
-    const user = userData?.user ?? null;
+    const { data } = await supabase.auth.getUser();
+    const user = data?.user ?? null;
 
-    // Gate off? just return (keeping refresh behavior)
-    if (!BETA_GATE_ON) return res;
-
-    const { pathname, search } = req.nextUrl;
-
-    if (isPublicPath(pathname)) return res;
-
-    // Not logged in
     if (!user) {
-      const u = req.nextUrl.clone();
-      u.pathname = "/login";
-      u.searchParams.set("next", pathname + (search || ""));
-      return NextResponse.redirect(u);
+      const redirect = new URL("/login", url.origin);
+      redirect.searchParams.set("next", url.pathname + url.search);
+      return Response.redirect(redirect.toString(), 302);
     }
 
     const email = (user.email || "").trim().toLowerCase();
+    if (OWNER_EMAIL && email === OWNER_EMAIL) return fetch(req);
 
-    // Owner bypass
-    if (OWNER_EMAIL && email === OWNER_EMAIL) return res;
-
-    // Allowlist check
-    const { data: row, error } = await supabase
+    const { data: row } = await supabase
       .from("beta_allowlist")
       .select("email")
       .eq("email", email)
       .maybeSingle();
 
-    if (!error && row?.email) return res;
+    if (row?.email) return fetch(req);
 
-    // Logged in but not allowlisted
-    const u = req.nextUrl.clone();
-    u.pathname = "/beta";
-    u.search = "";
-    return NextResponse.redirect(u);
+    return Response.redirect(new URL("/beta", url.origin).toString(), 302);
   } catch (e) {
-    // If proxy fails, do NOT hard-brick the site.
     console.error("proxy fatal:", e);
-    return NextResponse.next();
+    return fetch(req); // fail open
   }
 }
-
-export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
-};
