@@ -50,24 +50,34 @@ export async function POST() {
       );
     }
 
-    // Grant stones + mark
-    const { data: profile } = await admin
+    // ✅ NEW: Atomic credit (no select + overwrite)
+    const { error: incErr } = await admin.rpc("increment_spirit_stones", {
+      p_user_id: userId,
+      p_amount: GRANT,
+    });
+
+    if (incErr) {
+      console.error("beta grant: increment_spirit_stones error", incErr);
+      return NextResponse.json({ error: "Could not grant stones" }, { status: 500 });
+    }
+
+    // Mark as granted (separate update is fine)
+    await admin
+      .from("profiles")
+      .update({
+        beta_granted: true,
+        beta_granted_at: new Date().toISOString(),
+      })
+      .eq("id", userId);
+
+    // Fetch new balance for response (read-only)
+    const { data: after } = await admin
       .from("profiles")
       .select("spirit_stones")
       .eq("id", userId)
       .maybeSingle();
 
-    const prev = profile?.spirit_stones ?? 0;
-    const newBalance = prev + GRANT;
-
-    await admin
-      .from("profiles")
-      .update({
-        spirit_stones: newBalance,
-        beta_granted: true,
-        beta_granted_at: new Date().toISOString(),
-      })
-      .eq("id", userId);
+    const newBalance = after?.spirit_stones ?? null;
 
     return NextResponse.json(
       { ok: true, granted: GRANT, newBalance, grantedCount: grantedCount + 1 },

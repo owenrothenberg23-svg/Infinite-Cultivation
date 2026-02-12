@@ -77,7 +77,18 @@ export async function POST(
       );
     }
 
-    await supabase
+    // ✅ NEW: Ownership guard (chapter → story → user_id)
+    const { data: story, error: storyErr } = await supabase
+      .from("stories")
+      .select("user_id")
+      .eq("id", chapter.story_id)
+      .single();
+
+    if (storyErr || !story || story.user_id !== userData.user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { error: updErr } = await supabase
       .from("chapters")
       .update({
         content: finalContent,
@@ -86,6 +97,13 @@ export async function POST(
         finalized_at: new Date().toISOString(),
       })
       .eq("id", chapterId);
+
+    if (updErr) {
+      return NextResponse.json(
+        { error: updErr.message || "Update failed" },
+        { status: 500 }
+      );
+    }
 
     // (leave the rest of your existing logic below as-is)
     return NextResponse.json(
