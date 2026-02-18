@@ -1,6 +1,6 @@
 // app/read/[storyId]/page.tsx
 import Link from "next/link";
-import { supabaseServer } from "@/lib/supabase";
+import { getSupabaseServer } from "@/lib/supabase";
 import GenerateButton from "@/components/GenerateButton";
 import PublishStoryPanel from "@/components/PublishStoryPanel";
 
@@ -15,8 +15,11 @@ export default async function StoryPage({
   const p = (await (params as any)) as Params;
   const storyId = p.storyId;
 
+  // ✅ IMPORTANT: create server client per-request
+  const sb = getSupabaseServer();
+
   // Load story (now including public fields + author)
-  const { data: story } = await supabaseServer
+  const { data: story } = await sb
     .from("stories")
     .select(
       `
@@ -33,7 +36,7 @@ export default async function StoryPage({
     .single();
 
   // Load chapters
-  const { data: chapters } = await supabaseServer
+  const { data: chapters } = await sb
     .from("chapters")
     .select("id, chapter_number, title, created_at")
     .eq("story_id", storyId)
