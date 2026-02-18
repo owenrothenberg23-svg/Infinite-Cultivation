@@ -8,6 +8,7 @@ type PublicStory = {
   id: string;
   title: string;
   public_summary: string | null;
+  cover_image_url: string | null; // ✅ NEW
   created_at: string;
   view_count: number | null;
   avg_rating: number | null;
@@ -32,6 +33,10 @@ const GENRES: { value: string; label: string }[] = [
   { value: "urban", label: "Urban Cultivation" },
   { value: "sci_fantasy", label: "Sci-Fantasy" },
 ];
+
+function isAssetUrl(url: string) {
+  return /^https?:\/\//i.test(url.trim());
+}
 
 export default async function LibraryPage({
   searchParams,
@@ -75,7 +80,7 @@ export default async function LibraryPage({
   let query = sb
     .from("stories")
     .select(
-      "id, title, public_summary, created_at, view_count, avg_rating, author_username, primary_genre, tags"
+      "id, title, public_summary, cover_image_url, created_at, view_count, avg_rating, author_username, primary_genre, tags"
     )
     .eq("is_public", true)
     .order("created_at", { ascending: false })
@@ -209,62 +214,87 @@ export default async function LibraryPage({
               (GENRES.find((g) => g.value === story.primary_genre)?.label ??
                 story.primary_genre);
 
+            const cover = (story.cover_image_url || "").trim();
+            const hasCover = !!cover && isAssetUrl(cover);
+
             return (
               <li
                 key={story.id}
                 className="transition rounded-lg border border-white/5 bg-white/5 p-4 hover:border-indigo-500 hover:bg-white/10"
               >
-                <Link href={`/read/${story.id}`} className="block space-y-1">
-                  <h2 className="text-lg font-semibold text-white">
-                    {story.title}
-                  </h2>
-                  <p className="text-xs text-gray-400">by {author}</p>
-
-                  {/* genre + tags row */}
-                  {(genreLabel || (story.tags && story.tags.length > 0)) && (
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
-                      {genreLabel && (
-                        <span className="rounded-full bg-black/40 px-2 py-0.5 text-[11px] text-indigo-300">
-                          {genreLabel}
-                        </span>
-                      )}
-                      {story.tags?.slice(0, 3).map((tag) => (
-                        <span
-                          key={tag}
-                          className="rounded-full bg-black/30 px-2 py-0.5 text-[11px] text-gray-300"
-                        >
-                          #{tag}
-                        </span>
-                      ))}
-                      {story.tags && story.tags.length > 3 && (
-                        <span className="text-[11px] text-gray-500">
-                          +{story.tags.length - 3} more
-                        </span>
+                <Link href={`/read/${story.id}`} className="block">
+                  <div className="flex gap-4">
+                    {/* ✅ NEW: cover thumbnail */}
+                    <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/30">
+                      {hasCover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={cover}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="h-full w-full bg-gradient-to-br from-indigo-500/25 via-sky-500/20 to-emerald-500/20" />
                       )}
                     </div>
-                  )}
 
-                  {story.public_summary ? (
-                    <p className="text-sm text-gray-300 line-clamp-2">
-                      {story.public_summary}
-                    </p>
-                  ) : (
-                    <p className="text-sm italic text-gray-500">
-                      No summary yet.
-                    </p>
-                  )}
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <h2 className="text-lg font-semibold text-white">
+                        {story.title}
+                      </h2>
+                      <p className="text-xs text-gray-400">by {author}</p>
 
-                  <div className="mt-2 flex items-center gap-4 text-xs text-gray-400">
-                    <span>
-                      {story.view_count ?? 0}{" "}
-                      {story.view_count === 1 ? "view" : "views"}
-                    </span>
+                      {/* genre + tags row */}
+                      {(genreLabel || (story.tags && story.tags.length > 0)) && (
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
+                          {genreLabel && (
+                            <span className="rounded-full bg-black/40 px-2 py-0.5 text-[11px] text-indigo-300">
+                              {genreLabel}
+                            </span>
+                          )}
+                          {story.tags?.slice(0, 3).map((tag) => (
+                            <span
+                              key={tag}
+                              className="rounded-full bg-black/30 px-2 py-0.5 text-[11px] text-gray-300"
+                            >
+                              #{tag}
+                            </span>
+                          ))}
+                          {story.tags && story.tags.length > 3 && (
+                            <span className="text-[11px] text-gray-500">
+                              +{story.tags.length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      )}
 
-                    {typeof story.avg_rating === "number" && story.avg_rating > 0 ? (
-                      <span>★ {story.avg_rating.toFixed(1)}</span>
-                    ) : (
-                      <span className="italic text-gray-500">Not rated yet</span>
-                    )}
+                      {story.public_summary ? (
+                        <p className="text-sm text-gray-300 line-clamp-2">
+                          {story.public_summary}
+                        </p>
+                      ) : (
+                        <p className="text-sm italic text-gray-500">
+                          No summary yet.
+                        </p>
+                      )}
+
+                      <div className="mt-2 flex items-center gap-4 text-xs text-gray-400">
+                        <span>
+                          {story.view_count ?? 0}{" "}
+                          {story.view_count === 1 ? "view" : "views"}
+                        </span>
+
+                        {typeof story.avg_rating === "number" &&
+                        story.avg_rating > 0 ? (
+                          <span>★ {story.avg_rating.toFixed(1)}</span>
+                        ) : (
+                          <span className="italic text-gray-500">
+                            Not rated yet
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </Link>
               </li>

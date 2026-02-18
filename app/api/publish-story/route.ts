@@ -15,6 +15,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const storyId = body.storyId as string | undefined;
     const summary = (body.summary as string | undefined) ?? null;
+    const coverImageUrl = (body.coverImageUrl as string | undefined) ?? null;
 
     if (!storyId) {
       return NextResponse.json({ error: "Missing storyId" }, { status: 400 });
@@ -22,7 +23,6 @@ export async function POST(req: Request) {
 
     const sb = getSupabaseServer();
 
-    // ✅ Auth required (Bearer)
     const token = getBearer(req);
     if (!token) {
       return NextResponse.json(
@@ -39,7 +39,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ NEW: Closed beta allowlist check
     const email = userData.user.email?.toLowerCase().trim();
     if (!email) {
       return NextResponse.json(
@@ -63,10 +62,9 @@ export async function POST(req: Request) {
 
     const userId = userData.user.id;
 
-    // Load story + ownership + current publish state
     const { data: story, error: storyErr } = await sb
       .from("stories")
-      .select("id, user_id, is_public")
+      .select("id, user_id")
       .eq("id", storyId)
       .single();
 
@@ -81,18 +79,13 @@ export async function POST(req: Request) {
       );
     }
 
-    if (story.is_public) {
-      return NextResponse.json(
-        { error: "Story is already published" },
-        { status: 409 }
-      );
-    }
-
+    // ✅ Publish OR update (no more 409 conflict)
     const { error: updateErr } = await sb
       .from("stories")
       .update({
         is_public: true,
         public_summary: summary,
+        cover_image_url: coverImageUrl,
       })
       .eq("id", storyId);
 

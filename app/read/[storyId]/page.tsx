@@ -25,6 +25,7 @@ export default async function StoryPage({
         last_chapter_number,
         is_public,
         public_summary,
+        cover_image_url,
         author_username
       `
     )
@@ -53,9 +54,24 @@ export default async function StoryPage({
   const nextNumber = lastNum + 1;
   const hasChapters = !!chapters?.length;
 
+  const cover = (story.cover_image_url || "").trim();
+
   return (
     <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-8">
       <header className="space-y-3">
+        {/* ✅ NEW (safe): show cover if present */}
+        {cover ? (
+          <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={cover}
+              alt=""
+              className="h-48 w-full object-cover"
+              loading="lazy"
+            />
+          </div>
+        ) : null}
+
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-3xl font-bold">{story.title}</h1>
@@ -143,6 +159,7 @@ export default async function StoryPage({
       <PublishStoryPanel
         storyId={storyId}
         initialSummary={story.public_summary}
+        initialCoverUrl={story.cover_image_url ?? null} // ✅ NEW
         isAlreadyPublic={!!story.is_public}
       />
     </main>

@@ -3,20 +3,24 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
 type Props = {
   storyId: string;
   initialSummary: string | null;
+  initialCoverUrl?: string | null; // ✅ NEW (optional, won't break callers)
   isAlreadyPublic: boolean;
 };
 
 export default function PublishStoryPanel({
   storyId,
   initialSummary,
+  initialCoverUrl,
   isAlreadyPublic,
 }: Props) {
   const router = useRouter();
   const [summary, setSummary] = useState(initialSummary ?? "");
+  const [coverUrl, setCoverUrl] = useState((initialCoverUrl ?? "").trim()); // ✅ NEW
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,12 +31,26 @@ export default function PublishStoryPanel({
     setLoading(true);
 
     try {
+      // ✅ Get access token (required by your publish-story API)
+      const sb = supabaseBrowser();
+      const { data: sess, error: sessErr } = await sb.auth.getSession();
+      if (sessErr) throw sessErr;
+
+      const accessToken = sess.session?.access_token;
+      if (!accessToken) {
+        throw new Error("Please log in to continue");
+      }
+
       const res = await fetch("/api/publish-story", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           storyId,
-          publicSummary: summary || null,
+          summary: summary || null, // ✅ matches your API route
+          coverImageUrl: coverUrl || null, // ✅ NEW
         }),
       });
 
@@ -44,7 +62,7 @@ export default function PublishStoryPanel({
       setMessage("Story published to the Library.");
       router.refresh(); // refresh server components so Library/Story page update
     } catch (e: any) {
-      setError(e.message || "Failed to publish");
+      setError(e?.message || "Failed to publish");
     } finally {
       setLoading(false);
     }
@@ -69,7 +87,29 @@ export default function PublishStoryPanel({
         placeholder="A betrayed disciple falls into another realm and inherits a forbidden artifact..."
       />
 
-      <div className="mt-3 flex items-center gap-3">
+      {/* ✅ NEW: cover URL */}
+      <label className="mt-4 block text-sm font-medium text-gray-200">
+        Cover image URL (optional)
+      </label>
+      <input
+        value={coverUrl}
+        onChange={(e) => setCoverUrl(e.target.value)}
+        className="mt-1 w-full rounded-md border border-white/10 bg-black/40 px-3 py-2 text-sm text-gray-100 outline-none focus:border-indigo-500"
+        placeholder="https://…"
+      />
+      {coverUrl.trim() ? (
+        <div className="mt-3 overflow-hidden rounded-lg border border-white/10 bg-white/5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={coverUrl.trim()}
+            alt=""
+            className="h-40 w-full object-cover"
+            loading="lazy"
+          />
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex items-center gap-3">
         <button
           type="button"
           onClick={onPublish}
@@ -90,9 +130,7 @@ export default function PublishStoryPanel({
         )}
       </div>
 
-      {message && (
-        <p className="mt-2 text-xs text-emerald-400">{message}</p>
-      )}
+      {message && <p className="mt-2 text-xs text-emerald-400">{message}</p>}
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
     </section>
   );
