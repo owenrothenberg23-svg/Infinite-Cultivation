@@ -1,6 +1,6 @@
 // app/read/[storyId]/chapter/[chapterNumber]/page.tsx
 import Link from "next/link";
-import { supabaseServer } from "@/lib/supabase";
+import { getSupabaseServer } from "@/lib/supabase"; // ✅ changed
 import GenerateButton from "@/components/GenerateButton";
 import ChapterEditor from "@/components/ChapterEditor";
 
@@ -15,14 +15,15 @@ export default async function ChapterPage({
   const { storyId, chapterNumber } = await params;
   const chapterNum = Number(chapterNumber);
 
+  // ✅ create server client via helper (prevents the thrown error)
+  const supabase = getSupabaseServer();
+
   // Guard: invalid chapter number
   if (!Number.isFinite(chapterNum) || chapterNum <= 0) {
     return (
       <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-4">
         <h1 className="text-2xl font-bold">Invalid chapter</h1>
-        <p className="text-gray-400">
-          That chapter number doesn’t look right.
-        </p>
+        <p className="text-gray-400">That chapter number doesn’t look right.</p>
         <Link
           href={`/read/${storyId}`}
           className="text-indigo-400 hover:underline"
@@ -34,7 +35,7 @@ export default async function ChapterPage({
   }
 
   // Load story (for title & bounds + author)
-  const { data: story } = await supabaseServer
+  const { data: story } = await supabase
     .from("stories")
     .select("id, title, last_chapter_number, user_id")
     .eq("id", storyId)
@@ -52,9 +53,11 @@ export default async function ChapterPage({
   }
 
   // Load the chapter by composite key
-  const { data: chapter } = await supabaseServer
+  const { data: chapter } = await supabase
     .from("chapters")
-    .select("id, chapter_number, title, final_content, draft_content, content, created_at")
+    .select(
+      "id, chapter_number, title, final_content, draft_content, content, created_at"
+    )
     .eq("story_id", storyId)
     .eq("chapter_number", chapterNum)
     .maybeSingle();
@@ -67,7 +70,7 @@ export default async function ChapterPage({
     "";
 
   // Fetch recent memories up to this chapter
-  const { data: mems } = await supabaseServer
+  const { data: mems } = await supabase
     .from("memories")
     .select("kind, content, chapter_number")
     .eq("story_id", storyId)
@@ -144,11 +147,11 @@ export default async function ChapterPage({
         </h2>
 
         {chapterText.trim().length > 0 ? (
-          <div className="whitespace-pre-wrap leading-relaxed">{chapterText}</div>
+          <div className="whitespace-pre-wrap leading-relaxed">
+            {chapterText}
+          </div>
         ) : (
-          <p className="text-gray-400">
-            This chapter has no content yet.
-          </p>
+          <p className="text-gray-400">This chapter has no content yet.</p>
         )}
       </article>
 
