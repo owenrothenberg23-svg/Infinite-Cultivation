@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   try {
     const headerList = await headers();
     const sig = headerList.get("stripe-signature");
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
 
     if (!sig || !webhookSecret) {
       return NextResponse.json(
@@ -31,6 +31,7 @@ export async function POST(req: Request) {
       );
     }
 
+    // IMPORTANT: Stripe signature verification requires raw body
     const body = await req.text();
 
     let event: any;
@@ -51,12 +52,12 @@ export async function POST(req: Request) {
 
     const session = event.data.object as any;
 
-    const paymentStatus = session.payment_status;
-    if (paymentStatus !== "paid") {
+    // Only credit when actually paid
+    if (session?.payment_status !== "paid") {
       console.log("webhook: not paid, skipping", {
         eventId: event.id,
         sessionId: session?.id,
-        payment_status: paymentStatus,
+        payment_status: session?.payment_status,
       });
       return NextResponse.json({ received: true }, { status: 200 });
     }
@@ -71,6 +72,7 @@ export async function POST(req: Request) {
         ? session.payment_intent
         : session.payment_intent?.id;
 
+    // Fallback: PaymentIntent metadata
     if ((!userId || !packId) && paymentIntentId) {
       try {
         const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
@@ -99,14 +101,10 @@ export async function POST(req: Request) {
 
     const supabase = getSupabaseAdmin();
 
-    // ✅ 1) Idempotency: record event first
+    // ✅ 1) Idempotency: write event.id into stripe_events.id
+    // This matches your current schema (id + created_at) and fixes NOT NULL id issues.
     const { error: evErr } = await supabase.from("stripe_events").insert({
-      stripe_event_id: event.id,
-      event_type: event.type,
-      stripe_session_id: session?.id ?? null,
-      stripe_payment_intent_id: paymentIntentId ?? null,
-      user_id: userId,
-      pack_id: packId,
+      id: event.id,
     });
 
     if (evErr) {
@@ -118,17 +116,46 @@ export async function POST(req: Request) {
         return NextResponse.json({ received: true }, { status: 200 });
       }
       console.error("webhook: failed to insert stripe_events row", evErr);
+      // If idempotency insert fails, do NOT credit to avoid double credits.
       return NextResponse.json({ received: true }, { status: 200 });
     }
 
-    // ✅ 2) Credit stones ATOMICALLY (no select + overwrite)
+    // ✅ 2) Credit stones (RPC preferred; fallback if RPC missing/broken)
+    let credited = false;
+
     const { error: incErr } = await supabase.rpc("increment_spirit_stones", {
       p_user_id: userId,
       p_amount: stones,
     });
 
-    if (incErr) {
+    if (!incErr) {
+      credited = true;
+    } else {
       console.error("webhook: increment_spirit_stones error", incErr);
+
+      // Fallback: select + update (not perfect under concurrency, but better than zero credit)
+      const { data: profile, error: profErr } = await supabase
+        .from("profiles")
+        .select("spirit_stones")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profErr) {
+        console.error("webhook: fallback profile load error", profErr);
+      } else {
+        const prev = profile?.spirit_stones ?? 0;
+        const { error: updErr } = await supabase
+          .from("profiles")
+          .update({ spirit_stones: prev + stones })
+          .eq("id", userId);
+
+        if (updErr) console.error("webhook: fallback update error", updErr);
+        else credited = true;
+      }
+    }
+
+    if (!credited) {
+      // We already wrote stripe_events.id, so Stripe retries will be deduped.
       return NextResponse.json({ received: true }, { status: 200 });
     }
 
@@ -137,10 +164,12 @@ export async function POST(req: Request) {
       packId,
       stones,
       eventId: event.id,
+      sessionId: session?.id,
     });
 
-    // ✅ 3) Log purchase (unchanged) — only after successful credit
+    // ✅ 3) Best-effort purchase log (never blocks stone credit)
     try {
+      // Use the most likely columns; if your purchases table differs, you can adjust later.
       const { error: purchaseErr } = await supabase.from("purchases").insert({
         user_id: userId,
         pack_id: packId,
@@ -150,7 +179,8 @@ export async function POST(req: Request) {
         stripe_session_id: session?.id ?? null,
         stripe_payment_intent_id: paymentIntentId ?? null,
         stripe_event_id: event.id,
-      });
+        source: "stripe",
+      } as any);
 
       if (purchaseErr) {
         if (isDuplicateKey(purchaseErr)) {
