@@ -1,4 +1,3 @@
-// app/new/page.tsx
 "use client";
 
 import { useState, KeyboardEvent } from "react";
@@ -7,7 +6,6 @@ import { useRouter } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-// Keep this in sync with app/library/page.tsx
 const GENRES_FOR_LIBRARY = [
   { value: "", label: "Select a primary genre" },
   { value: "xianxia", label: "Xianxia" },
@@ -17,14 +15,12 @@ const GENRES_FOR_LIBRARY = [
   { value: "sci_fantasy", label: "Sci-Fantasy" },
 ];
 
-type CreateMode = "manual" | "ai_assisted";
+type Mode = "manual" | "ai";
 
 export default function NewStoryPage() {
   const router = useRouter();
+  const [mode, setMode] = useState<Mode>("ai");
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // ✅ NEW: creation mode tabs
-  const [mode, setMode] = useState<CreateMode>("manual");
 
   // Tag UI state
   const [tagInput, setTagInput] = useState("");
@@ -40,13 +36,12 @@ export default function NewStoryPage() {
       const form = e.currentTarget;
       const fd = new FormData(form);
 
-      // ✅ ensure tags_json is present and current
       fd.set("tags_json", JSON.stringify(tags));
 
-      // ✅ NEW: send mode hint (backend can ignore safely if not implemented)
-      fd.set("origin_mode", mode);
+      const endpoint =
+        mode === "manual" ? "/api/create-story-manual" : "/api/create-story";
 
-      const res = await fetch("/api/create-story", {
+      const res = await fetch(endpoint, {
         method: "POST",
         body: fd,
         credentials: "include",
@@ -67,6 +62,7 @@ export default function NewStoryPage() {
         return;
       }
 
+      // Your /story/[id] redirects to /read/[id]
       router.push(`/story/${storyId}`);
     } catch (err: any) {
       alert(err?.message || "Unexpected error");
@@ -111,53 +107,52 @@ export default function NewStoryPage() {
     setTags((prev) => prev.filter((t) => t !== tag));
   }
 
-  const isAI = mode === "ai_assisted";
-
   return (
     <>
       <main className="max-w-2xl mx-auto p-8 text-gray-200">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-bold">Create a New Story</h1>
-            <p className="mt-1 text-sm text-gray-400">
-              Start writing manually, or use AI as an assistant (optional).
-            </p>
-          </div>
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <h1 className="text-3xl font-bold">Create a New Story</h1>
+          <Link href="/" className="text-sm text-gray-400 hover:text-white">
+            ← Back
+          </Link>
         </div>
 
-        {/* ✅ NEW: mode tabs */}
-        <div className="mb-6 inline-flex rounded-full bg-gray-800 p-1 text-sm">
+        {/* Mode tabs */}
+        <div className="mb-4 flex gap-2">
           <button
             type="button"
-            onClick={() => setMode("manual")}
-            className={`rounded-full px-4 py-1.5 font-medium transition ${
-              mode === "manual"
-                ? "bg-indigo-600 text-white"
-                : "text-gray-300 hover:text-white"
-            }`}
-          >
-            Write from scratch
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("ai_assisted")}
-            className={`rounded-full px-4 py-1.5 font-medium transition ${
-              mode === "ai_assisted"
-                ? "bg-indigo-600 text-white"
-                : "text-gray-300 hover:text-white"
+            onClick={() => setMode("ai")}
+            className={`rounded-md px-3 py-1.5 text-sm border ${
+              mode === "ai"
+                ? "bg-indigo-600 border-indigo-400 text-white"
+                : "bg-white/5 border-white/10 text-gray-200 hover:bg-white/10"
             }`}
           >
             AI-assisted
           </button>
+          <button
+            type="button"
+            onClick={() => setMode("manual")}
+            className={`rounded-md px-3 py-1.5 text-sm border ${
+              mode === "manual"
+                ? "bg-emerald-600 border-emerald-400 text-white"
+                : "bg-white/5 border-white/10 text-gray-200 hover:bg-white/10"
+            }`}
+          >
+            Write manually
+          </button>
         </div>
+
+        <p className="mb-6 text-sm text-gray-400">
+          {mode === "ai"
+            ? "Use AI to help kickstart your saga. You’ll still be able to edit everything afterward."
+            : "Create a story and start writing Chapter 1 immediately. AI tools will be available inside the editor (optional)."}
+        </p>
 
         <form
           onSubmit={handleSubmit}
           className="space-y-6 bg-white/5 p-6 rounded-lg border border-white/10"
         >
-          {/* ✅ Hidden field (safe even if backend ignores) */}
-          <input type="hidden" name="origin_mode" value={mode} />
-
           {/* Title */}
           <label className="block text-sm">
             <span className="block mb-1 text-gray-300">Title</span>
@@ -167,6 +162,22 @@ export default function NewStoryPage() {
               placeholder="Heaven-Splitting Demon Emperor"
               className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
             />
+          </label>
+
+          {/* Story pitch */}
+          <label className="block text-sm">
+            <span className="block mb-1 text-gray-300">
+              Story Pitch (what you want this book to be)
+            </span>
+            <textarea
+              name="story_pitch"
+              rows={6}
+              placeholder="Example: A cunning outer-sect disciple with a hidden body-tempering art seeks revenge via politics, not brute force..."
+              className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
+            />
+            <span className="block mt-1 text-xs text-gray-400">
+              Tip: 2–8 sentences. This becomes a permanent north star for the plot.
+            </span>
           </label>
 
           {/* Primary Library Genre */}
@@ -188,71 +199,9 @@ export default function NewStoryPage() {
             </select>
           </label>
 
-          {/* Tags */}
-          <fieldset className="border border-gray-700 rounded p-3">
-            <legend className="text-sm text-gray-300 px-1">Tags</legend>
-
-            <div className="flex flex-wrap gap-2 rounded-md bg-gray-900 border border-gray-700 px-2 py-2">
-              {tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center gap-1 rounded-full bg-black/40 px-2 py-0.5 text-[11px] text-gray-100"
-                >
-                  #{tag}
-                  <button
-                    type="button"
-                    onClick={() => removeTag(tag)}
-                    className="text-gray-400 hover:text-red-300"
-                    aria-label={`Remove tag ${tag}`}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              <input
-                type="text"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={handleTagKeyDown}
-                placeholder={tags.length === 0 ? "Add a tag…" : ""}
-                className="flex-1 min-w-[120px] bg-transparent border-none px-1 py-0.5 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none"
-              />
-            </div>
-            <p className="mt-2 text-xs text-gray-500">
-              Tip: try tags like <span className="text-gray-300">#ruthless</span>,{" "}
-              <span className="text-gray-300">#sect_politics</span>,{" "}
-              <span className="text-gray-300">#system</span>.
-            </p>
-          </fieldset>
-
-          {/* ✅ AI-only section (does not show for manual writers) */}
-          {isAI ? (
+          {/* Only show the big AI preference fields when in AI mode */}
+          {mode === "ai" && (
             <>
-              <div className="rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-indigo-300">
-                  AI-assisted setup
-                </p>
-                <p className="mt-1 text-sm text-gray-300">
-                  These fields guide the assistant. You’ll still be able to edit everything.
-                </p>
-              </div>
-
-              {/* Story pitch */}
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-300">
-                  Story Pitch (what you want this book to be)
-                </span>
-                <textarea
-                  name="story_pitch"
-                  rows={6}
-                  placeholder="Example: A cunning outer-sect disciple with a hidden body-tempering art seeks revenge via politics, not brute force..."
-                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
-                />
-                <span className="block mt-1 text-xs text-gray-400">
-                  Tip: 2–8 sentences. This becomes a permanent north star for the plot.
-                </span>
-              </label>
-
               {/* Tone */}
               <label className="block text-sm">
                 <span className="block mb-1 text-gray-300">Tone</span>
@@ -412,23 +361,68 @@ export default function NewStoryPage() {
                 </label>
               </fieldset>
             </>
-          ) : (
-            <div className="rounded-lg border border-white/10 bg-black/20 p-4">
-              <p className="text-sm text-gray-300">
-                You’re creating a <span className="text-white font-medium">manual</span> story.
-                You can write chapters yourself and optionally use AI tools later inside the editor.
-              </p>
+          )}
 
-              {/* Keep backend-compatible fields present (hidden) so nothing breaks */}
-              <input type="hidden" name="story_pitch" value="" />
-              <input type="hidden" name="tone" value="epic" />
-              <input type="hidden" name="world_type" value="xianxia_high" />
-              <input type="hidden" name="mc_personality" value="steadfast" />
-              <input type="hidden" name="op_level" value="balanced" />
-              <input type="hidden" name="romance_level" value="subplot" />
-              <input type="hidden" name="violence_level" value="balanced" />
-              <input type="hidden" name="power_progression" value="steady" />
+          {/* Tags (both modes) */}
+          <fieldset className="border border-gray-700 rounded p-3">
+            <legend className="text-sm text-gray-300 px-1">Tags</legend>
+
+            <div className="flex flex-wrap gap-2 rounded-md bg-gray-900 border border-gray-700 px-2 py-2">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 rounded-full bg-black/40 px-2 py-0.5 text-[11px] text-gray-100"
+                >
+                  #{tag}
+                  <button
+                    type="button"
+                    onClick={() => removeTag(tag)}
+                    className="text-gray-400 hover:text-red-300"
+                    aria-label={`Remove tag ${tag}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <input
+                type="text"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={handleTagKeyDown}
+                placeholder={tags.length === 0 ? "Add a tag…" : ""}
+                className="flex-1 min-w-[120px] bg-transparent border-none px-1 py-0.5 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none"
+              />
             </div>
+          </fieldset>
+
+          {/* Manual-only: chapter 1 starter */}
+          {mode === "manual" && (
+            <fieldset className="border border-gray-700 rounded p-3 space-y-3">
+              <legend className="text-sm text-gray-300 px-1">Chapter 1 (optional)</legend>
+
+              <label className="block text-sm">
+                <span className="block mb-1 text-gray-300">Chapter 1 title</span>
+                <input
+                  name="initial_chapter_title"
+                  placeholder="The Outer Sect Disciple"
+                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="block mb-1 text-gray-300">Chapter 1 draft</span>
+                <textarea
+                  name="initial_chapter_content"
+                  rows={8}
+                  placeholder="Start writing… (you can edit and continue after creation)"
+                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
+                />
+              </label>
+
+              <p className="text-xs text-gray-400">
+                Don’t worry—AI tools will be available inside the editor later if you want them.
+              </p>
+            </fieldset>
           )}
 
           <button
@@ -436,19 +430,9 @@ export default function NewStoryPage() {
             disabled={isSubmitting}
             className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:bg-indigo-900 disabled:text-gray-400"
           >
-            {isSubmitting
-              ? "Channeling Qi…"
-              : mode === "manual"
-              ? "Create Story"
-              : "Create Story (AI-assisted)"}
+            {isSubmitting ? "Channeling Qi…" : mode === "manual" ? "Create Story & Start Writing" : "Create Story"}
           </button>
         </form>
-
-        <div className="mt-6">
-          <Link href="/" className="text-gray-400 hover:text-white">
-            ← Back
-          </Link>
-        </div>
       </main>
 
       {isSubmitting && (

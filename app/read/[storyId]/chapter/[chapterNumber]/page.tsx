@@ -180,6 +180,7 @@ export default async function ChapterPage({
         chapterNumber={chapterNum}
         authorId={story.user_id ?? null}
         initialContent={chapterText ?? ""}
+        initialTitle={(chapter as any)?.title ?? ""}
       />
 
       <nav className="flex items-center justify-between mt-8">
