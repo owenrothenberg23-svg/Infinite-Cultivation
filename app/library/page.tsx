@@ -1,6 +1,8 @@
 // app/library/page.tsx
-import { supabaseAdmin } from "@/lib/supabaseServer";
 import Link from "next/link";
+import { supabaseAdmin } from "@/lib/supabaseServer";
+import { supabaseServerClient } from "@/lib/supabaseServerSSR";
+import StoryBookmarkButton from "@/components/StoryBookmarkButton";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +10,7 @@ type PublicStory = {
   id: string;
   title: string;
   public_summary: string | null;
-  cover_image_url: string | null; // ✅ NEW
+  cover_image_url: string | null;
   created_at: string;
   view_count: number | null;
   avg_rating: number | null;
@@ -23,8 +25,6 @@ type SearchParams =
 
 type SearchParamsResolved = Record<string, string | string[] | undefined>;
 
-// Simple genre options for the filter dropdown.
-// Adjust values/labels to match what you actually store in primary_genre.
 const GENRES: { value: string; label: string }[] = [
   { value: "", label: "All genres" },
   { value: "xianxia", label: "Xianxia" },
@@ -49,10 +49,8 @@ export default async function LibraryPage({
   if (searchParams) {
     const maybePromise = searchParams as any;
     if (typeof maybePromise?.then === "function") {
-      // It's a Promise
       sp = ((await maybePromise) ?? {}) as SearchParamsResolved;
     } else {
-      // It's already a plain object
       sp = (searchParams as SearchParamsResolved) ?? {};
     }
   }
@@ -74,10 +72,10 @@ export default async function LibraryPage({
       ? genreRaw[0] ?? ""
       : "";
 
-  const sb = supabaseAdmin();
+  // ✅ Public stories list (kept as admin read for stability)
+  const sbAdmin = supabaseAdmin();
 
-  // Build query with optional filters
-  let query = sb
+  let query = sbAdmin
     .from("stories")
     .select(
       "id, title, public_summary, cover_image_url, created_at, view_count, avg_rating, author_username, primary_genre, tags"
@@ -87,7 +85,6 @@ export default async function LibraryPage({
     .limit(30);
 
   if (q) {
-    // Match title or summary
     query = query.or(`title.ilike.%${q}%,public_summary.ilike.%${q}%`);
   }
 
@@ -97,8 +94,30 @@ export default async function LibraryPage({
 
   const { data, error } = await query;
   const stories = (data as PublicStory[] | null) ?? [];
-
   const activeFilters = q || genre;
+
+  // ✅ Determine logged-in user (cookie auth) and load their bookmarks
+  const ssr = await supabaseServerClient();
+  const { data: userData } = await ssr.auth.getUser();
+  const user = userData?.user ?? null;
+
+  let savedIds = new Set<string>();
+
+  if (user && stories.length > 0) {
+    const storyIds = stories.map((s) => s.id);
+
+    const { data: bmRows } = await ssr
+      .from("story_bookmarks")
+      .select("story_id")
+      .eq("user_id", user.id)
+      .in("story_id", storyIds);
+
+    if (bmRows && Array.isArray(bmRows)) {
+      for (const r of bmRows as any[]) {
+        if (r?.story_id) savedIds.add(String(r.story_id));
+      }
+    }
+  }
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 text-gray-100">
@@ -111,7 +130,6 @@ export default async function LibraryPage({
             </p>
           </div>
 
-          {/* simple tab bar – still visual only for now */}
           <div className="inline-flex rounded-full bg-gray-800 p-1 text-sm">
             <button className="rounded-full bg-indigo-600 px-3 py-1 font-medium">
               Newest
@@ -125,7 +143,6 @@ export default async function LibraryPage({
           </div>
         </div>
 
-        {/* Search + genre filter */}
         <form
           method="get"
           className="flex flex-col gap-3 rounded-lg border border-white/10 bg-black/40 p-3 text-sm sm:flex-row sm:items-center"
@@ -194,9 +211,7 @@ export default async function LibraryPage({
       </header>
 
       {error && (
-        <p className="mb-4 text-sm text-red-400">
-          Failed to load public stories.
-        </p>
+        <p className="mb-4 text-sm text-red-400">Failed to load public stories.</p>
       )}
 
       {stories.length === 0 ? (
@@ -217,14 +232,24 @@ export default async function LibraryPage({
             const cover = (story.cover_image_url || "").trim();
             const hasCover = !!cover && isAssetUrl(cover);
 
+            const isSaved = savedIds.has(story.id);
+
             return (
               <li
                 key={story.id}
-                className="transition rounded-lg border border-white/5 bg-white/5 p-4 hover:border-indigo-500 hover:bg-white/10"
+                className="relative transition rounded-lg border border-white/5 bg-white/5 p-4 hover:border-indigo-500 hover:bg-white/10"
               >
+                {/* ✅ Save button (does not navigate) */}
+                <div className="absolute right-4 top-4 z-10">
+                  <StoryBookmarkButton
+                    storyId={story.id}
+                    initialSaved={isSaved}
+                    isAuthed={!!user}
+                  />
+                </div>
+
                 <Link href={`/read/${story.id}`} className="block">
                   <div className="flex gap-4">
-                    {/* ✅ NEW: cover thumbnail */}
                     <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/30">
                       {hasCover ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -245,7 +270,6 @@ export default async function LibraryPage({
                       </h2>
                       <p className="text-xs text-gray-400">by {author}</p>
 
-                      {/* genre + tags row */}
                       {(genreLabel || (story.tags && story.tags.length > 0)) && (
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
                           {genreLabel && (
