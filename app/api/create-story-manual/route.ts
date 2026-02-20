@@ -9,106 +9,107 @@ function toBool(v: FormDataEntryValue | null) {
   return s === "1" || s === "true" || s === "on" || s === "yes";
 }
 
+function cleanTags(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const cleaned = raw
+    .map((t) => String(t).trim())
+    .filter((t) => t.length > 0 && t.length <= 40)
+    .slice(0, 20);
+  return cleaned.length ? cleaned : null;
+}
+
 export async function POST(req: Request) {
   try {
-    const supabase = getSupabaseServer();
+    const sb = getSupabaseServer();
 
-    // Auth (cookie-based)
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    // cookie auth
+    const { data: userData, error: userErr } = await sb.auth.getUser();
     if (userErr || !userData?.user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
-
     const userId = userData.user.id;
 
     const fd = await req.formData();
+    const f = (k: string, d = "") => String(fd.get(k) ?? d).trim();
 
-    const title = String(fd.get("title") || "").trim();
-    if (!title) {
-      return NextResponse.json({ error: "Title is required" }, { status: 400 });
-    }
+    const title = f("title");
+    if (!title) return NextResponse.json({ error: "Title is required" }, { status: 400 });
 
-    const story_pitch = String(fd.get("story_pitch") || "").trim();
-    const tone = String(fd.get("tone") || "").trim();
-    const world_type = String(fd.get("world_type") || "").trim();
-    const mc_personality = String(fd.get("mc_personality") || "").trim();
-    const op_level = String(fd.get("op_level") || "").trim();
-    const romance_level = String(fd.get("romance_level") || "").trim();
-    const violence_level = String(fd.get("violence_level") || "").trim();
-    const power_progression = String(fd.get("power_progression") || "").trim();
+    const story_pitch = f("story_pitch");
 
-    const primary_genre = String(fd.get("primary_genre") || "").trim();
-
-    // genres[] checkboxes
     const genres = fd.getAll("genres").map((x) => String(x));
+    const primary_genre = f("primary_genre") || null;
 
-    // tags_json
-    let tags_json: any = [];
-    try {
-      tags_json = JSON.parse(String(fd.get("tags_json") || "[]"));
-      if (!Array.isArray(tags_json)) tags_json = [];
-    } catch {
-      tags_json = [];
+    let tags_json: string[] | null = null;
+    const tagsRaw = f("tags_json");
+    if (tagsRaw) {
+      try {
+        tags_json = cleanTags(JSON.parse(tagsRaw));
+      } catch {
+        tags_json = null;
+      }
     }
 
-    // optional flags
-    const flag_system_cheats = toBool(fd.get("flag_system_cheats"));
-    const flag_transmigration = toBool(fd.get("flag_transmigration"));
-    const flag_comedy = toBool(fd.get("flag_comedy"));
-    const flag_grimdark = toBool(fd.get("flag_grimdark"));
+    const prefs_json = {
+      tone: f("tone", "epic") || "epic",
+      world_type: f("world_type", "xianxia_high") || "xianxia_high",
+      mc_personality: f("mc_personality", "steadfast") || "steadfast",
+      op_level: f("op_level", "balanced") || "balanced",
+      romance_level: f("romance_level", "subplot") || "subplot",
+      violence_level: f("violence_level", "balanced") || "balanced",
+      power_progression: f("power_progression", "steady") || "steady",
+      genres,
+      flags: {
+        system_cheats: toBool(fd.get("flag_system_cheats")),
+        transmigration: toBool(fd.get("flag_transmigration")),
+        comedy: toBool(fd.get("flag_comedy")),
+        grimdark: toBool(fd.get("flag_grimdark")),
+      },
+    };
 
-    // manual initial chapter content (optional)
-    const initial_chapter_title = String(fd.get("initial_chapter_title") || "").trim();
-    const initial_chapter_content = String(fd.get("initial_chapter_content") || "").trim();
+    const initial_chapter_title = f("initial_chapter_title");
+    const initial_chapter_content = f("initial_chapter_content");
 
-    // 1) Insert story
-    const { data: story, error: storyErr } = await supabase
+    // 1) Insert story (CONSISTENT SCHEMA)
+    const { data: story, error: storyErr } = await sb
       .from("stories")
       .insert({
+        user_id: userId,                    // ✅ ALWAYS SET
         title,
         story_pitch: story_pitch || null,
-        tone: tone || null,
-        world_type: world_type || null,
-        mc_personality: mc_personality || null,
-        op_level: op_level || null,
-        romance_level: romance_level || null,
-        violence_level: violence_level || null,
-        power_progression: power_progression || null,
-        primary_genre: primary_genre || null,
+        prefs_json,
         genres: genres.length ? genres : null,
+        primary_genre,
         tags_json,
-        flag_system_cheats,
-        flag_transmigration,
-        flag_comedy,
-        flag_grimdark,
-        user_id: userId,
-        last_chapter_number: 1,
+        last_chapter_number: 1,             // because we create chapter 1 below
       })
       .select("id")
       .single();
 
     if (storyErr || !story?.id) {
       console.error("create-story-manual: story insert error", storyErr);
-      return NextResponse.json({ error: "Failed to create story" }, { status: 500 });
+      return NextResponse.json({ error: storyErr?.message || "Failed to create story" }, { status: 500 });
     }
 
     const storyId = story.id as string;
 
-    // 2) Create chapter 1 as a draft (and optionally finalized if content exists)
+    // 2) Create chapter 1 (draft)
     const chapterRow: any = {
       story_id: storyId,
       chapter_number: 1,
       title: initial_chapter_title || null,
       draft_content: initial_chapter_content || "",
-      // keep compatibility if you still read `content` anywhere:
-      content: initial_chapter_content || "",
+      content: initial_chapter_content || "", // compatibility
       final_content: null,
     };
 
-    const { error: chErr } = await supabase.from("chapters").insert(chapterRow);
+    const { error: chErr } = await sb.from("chapters").insert(chapterRow);
     if (chErr) {
       console.error("create-story-manual: chapter insert error", chErr);
-      return NextResponse.json({ error: "Story created but failed to create chapter 1" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Story created but failed to create chapter 1" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ ok: true, story: { id: storyId } }, { status: 200 });

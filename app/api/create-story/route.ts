@@ -1,7 +1,5 @@
 // app/api/create-story/route.ts
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
 import { getSupabaseServer } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -17,58 +15,36 @@ function wantsHtml(req: Request) {
   return accept.includes("text/html");
 }
 
+function cleanTags(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const cleaned = raw
+    .map((t) => String(t).trim())
+    .filter((t) => t.length > 0 && t.length <= 40)
+    .slice(0, 20);
+  return cleaned.length ? cleaned : null;
+}
+
 export async function POST(req: Request) {
   try {
-    // Admin client for DB writes
-    const supabaseAdmin = getSupabaseServer();
+    const sb = getSupabaseServer();
 
     // -----------------------------
     // AUTH: Bearer OR Cookie session
     // -----------------------------
     let authedUserId: string | null = null;
 
-    // 1) Try Bearer token first
     const token = getBearer(req);
     if (token) {
-      const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
-      if (!userErr && userData?.user?.id) {
-        authedUserId = userData.user.id;
-      }
+      const { data, error } = await sb.auth.getUser(token);
+      if (!error && data?.user?.id) authedUserId = data.user.id;
     }
 
-    // 2) Fallback to cookie-based auth
     if (!authedUserId) {
-      const cookieStore = await cookies();
-
-      const sb = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return cookieStore.getAll();
-            },
-            setAll(cookiesToSet) {
-              try {
-                for (const c of cookiesToSet) {
-                  cookieStore.set(c.name, c.value, c.options);
-                }
-              } catch {
-                // no-op
-              }
-            },
-          },
-        }
-      );
-
       const { data, error } = await sb.auth.getUser();
-      if (!error && data?.user?.id) {
-        authedUserId = data.user.id;
-      }
+      if (!error && data?.user?.id) authedUserId = data.user.id;
     }
 
     if (!authedUserId) {
-      // If this was a browser navigation, redirect to login instead of JSON
       if (wantsHtml(req)) {
         return NextResponse.redirect(new URL("/login", req.url), { status: 303 });
       }
@@ -76,17 +52,17 @@ export async function POST(req: Request) {
     }
 
     // -----------------------------
-    // Parse payload
+    // Parse payload (JSON or FormData)
     // -----------------------------
-    const ctypeRaw = req.headers.get("content-type") || "";
-    const ctype = ctypeRaw.toLowerCase();
+    const ctype = (req.headers.get("content-type") || "").toLowerCase();
 
     let title = "";
-    let prefs: any = {};
     let story_pitch = "";
     let genres: string[] = [];
     let primary_genre: string | null = null;
-    let tags: string[] | null = null;
+    let tags_json: string[] | null = null;
+
+    let prefs: any = {};
 
     if (ctype.includes("application/json")) {
       const body = await req.json().catch(() => ({} as any));
@@ -100,17 +76,10 @@ export async function POST(req: Request) {
         genres = [body.genres];
       }
 
-      if (body.primary_genre) {
-        const pg = String(body.primary_genre).trim();
-        primary_genre = pg || null;
-      }
+      const pg = String(body.primary_genre || "").trim();
+      primary_genre = pg || null;
 
-      if (Array.isArray(body.tags)) {
-        tags = body.tags
-          .map((t: any) => String(t).trim())
-          .filter((t: string) => t.length > 0 && t.length <= 40)
-          .slice(0, 20);
-      }
+      tags_json = cleanTags(body.tags);
 
       prefs = {
         tone: body.tone || "epic",
@@ -144,14 +113,9 @@ export async function POST(req: Request) {
       if (tagsRaw) {
         try {
           const parsed = JSON.parse(tagsRaw);
-          if (Array.isArray(parsed)) {
-            tags = parsed
-              .map((t) => String(t).trim())
-              .filter((t) => t.length > 0 && t.length <= 40)
-              .slice(0, 20);
-          }
-        } catch (e) {
-          console.warn("create-story: failed to parse tags_json", e);
+          tags_json = cleanTags(parsed);
+        } catch {
+          tags_json = null;
         }
       }
 
@@ -174,52 +138,51 @@ export async function POST(req: Request) {
     }
 
     if (!title) {
-      const url = new URL(req.url);
-      const qTitle = url.searchParams.get("title");
-      if (qTitle) title = qTitle.trim();
-    }
-
-    if (!title) {
       if (wantsHtml(req)) {
-        return NextResponse.redirect(new URL("/new?err=missing_title", req.url), { status: 303 });
+        return NextResponse.redirect(new URL("/new?err=missing_title", req.url), {
+          status: 303,
+        });
       }
       return NextResponse.json({ error: "Missing title" }, { status: 400 });
     }
 
     // -----------------------------
-    // Insert (admin)
+    // Insert story (CONSISTENT SCHEMA)
     // -----------------------------
-    const { data, error } = await supabaseAdmin
+    const { data: story, error: insertErr } = await sb
       .from("stories")
       .insert({
+        user_id: authedUserId,      // ✅ ALWAYS SET
         title,
+        story_pitch: story_pitch || null,
         prefs_json: prefs,
-        story_pitch,
-        user_id: authedUserId,
-        genres,
+        genres: genres.length ? genres : null,
         primary_genre,
-        tags,
+        tags_json,                  // ✅ correct column name
       })
       .select("id")
       .single();
 
-    if (error || !data) {
+    if (insertErr || !story?.id) {
+      console.error("create-story: insertErr", insertErr);
       if (wantsHtml(req)) {
-        return NextResponse.redirect(new URL("/new?err=insert_failed", req.url), { status: 303 });
+        return NextResponse.redirect(new URL("/new?err=insert_failed", req.url), {
+          status: 303,
+        });
       }
       return NextResponse.json(
-        { error: error?.message || "Insert failed" },
+        { error: insertErr?.message || "Insert failed" },
         { status: 500 }
       );
     }
 
-    // ✅ If browser navigation / form submit: redirect to the story page
     if (wantsHtml(req)) {
-      return NextResponse.redirect(new URL(`/story/${data.id}`, req.url), { status: 303 });
+      return NextResponse.redirect(new URL(`/story/${story.id}`, req.url), {
+        status: 303,
+      });
     }
 
-    // ✅ If fetch/XHR: JSON
-    return NextResponse.json({ story: { id: data.id } }, { status: 200 });
+    return NextResponse.json({ story: { id: story.id } }, { status: 200 });
   } catch (err: any) {
     console.error("create-story fatal:", err);
     return NextResponse.json(
