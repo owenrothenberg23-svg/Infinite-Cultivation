@@ -1,9 +1,10 @@
-// components/HeaderNav.tsx
 "use client";
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import ModeToggle from "@/components/ModeToggle"; // ✅ NEW
+import { useMode } from "@/components/ModeProvider"; // ✅ NEW
 
 type ProfileRow = {
   display_name: string | null;
@@ -11,6 +12,8 @@ type ProfileRow = {
 };
 
 export default function HeaderNav() {
+  const { mode } = useMode(); // ✅ NEW
+
   const [loading, setLoading] = useState(true);
   const [isAuthed, setIsAuthed] = useState(false);
   const [label, setLabel] = useState<string>("");
@@ -91,21 +94,48 @@ export default function HeaderNav() {
 
   return (
     <nav className="flex items-center gap-4 text-sm">
-      <Link href="/library" className="text-gray-300 hover:text-white">
-        Library
-      </Link>
-      <Link href="/new" className="text-gray-300 hover:text-white">
-        New Story
-      </Link>
-      <Link href="/dashboard" className="text-gray-300 hover:text-white">
-        Dashboard
-      </Link>
-      <Link href="/titles" className="text-gray-300 hover:text-white">
-        Titles
-      </Link>
-      <Link href="/store" className="text-gray-300 hover:text-white">
-        Store
-      </Link>
+      {/* ✅ Mode toggle always visible */}
+      <ModeToggle />
+
+      {/* ✅ Mode-aware nav ordering / emphasis */}
+      {mode === "reader" ? (
+        <>
+          <Link href="/library" className="text-gray-200 hover:text-white">
+            Library
+          </Link>
+          <Link href="/titles" className="text-gray-300 hover:text-white">
+            Titles
+          </Link>
+          <Link href="/store" className="text-gray-300 hover:text-white">
+            Store
+          </Link>
+          <Link href="/dashboard" className="text-gray-300 hover:text-white">
+            Dashboard
+          </Link>
+          <Link href="/new" className="text-gray-300 hover:text-white">
+            New Story
+          </Link>
+        </>
+      ) : (
+        <>
+          <Link href="/dashboard" className="text-gray-200 hover:text-white">
+            Dashboard
+          </Link>
+          <Link href="/new" className="text-gray-300 hover:text-white">
+            New Story
+          </Link>
+          <Link href="/library" className="text-gray-300 hover:text-white">
+            Library
+          </Link>
+          <Link href="/titles" className="text-gray-300 hover:text-white">
+            Titles
+          </Link>
+          <Link href="/store" className="text-gray-300 hover:text-white">
+            Store
+          </Link>
+        </>
+      )}
+
       <Link href="/account" className="text-gray-300 hover:text-white">
         Account
       </Link>
