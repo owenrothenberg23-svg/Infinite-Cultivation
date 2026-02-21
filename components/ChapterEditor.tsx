@@ -12,6 +12,8 @@ type Props = {
   initialTitle?: string;
 };
 
+type AiMode = "fix" | "rewrite" | "continue" | "suggest";
+
 export default function ChapterEditor({
   storyId,
   chapterNumber,
@@ -36,6 +38,13 @@ export default function ChapterEditor({
   // autosave
   const lastSavedHashRef = useRef<string>("");
   const autosaveTimerRef = useRef<any>(null);
+
+  // AI tools
+  const [aiMode, setAiMode] = useState<AiMode>("fix");
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiOut, setAiOut] = useState<string>("");
+  const [aiErr, setAiErr] = useState<string | null>(null);
 
   // Check if current user is the author
   useEffect(() => {
@@ -180,6 +189,72 @@ export default function ChapterEditor({
     setStatus(null);
     setContent(initialContent);
     setTitle(initialTitle);
+    setAiOut("");
+    setAiErr(null);
+  }
+
+  async function runAi() {
+    setAiErr(null);
+    setAiOut("");
+    setStatus(null);
+
+    const txt = content.trim();
+    if (!txt) {
+      setAiErr("Nothing to run AI on (chapter is empty).");
+      return;
+    }
+
+    setAiBusy(true);
+    try {
+      const res = await fetch("/api/ai/edit-assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storyId,
+          chapterNumber,
+          mode: aiMode,
+          instruction: aiInstruction || "",
+          text: txt,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+      setAiOut(String(data?.output || "").trim());
+      if (!String(data?.output || "").trim()) {
+        setAiErr("AI returned empty output.");
+      }
+    } catch (e: any) {
+      setAiErr(e?.message || "AI request failed.");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  function applyAiReplace() {
+    if (!aiOut.trim()) return;
+    setContent(aiOut);
+    setAiOut("");
+    setAiErr(null);
+    setStatus("AI result applied to editor (not saved yet).");
+  }
+
+  function applyAiAppend() {
+    if (!aiOut.trim()) return;
+    setContent((prev) => (prev.trimEnd() + "\n\n" + aiOut.trim()));
+    setAiOut("");
+    setAiErr(null);
+    setStatus("AI continuation appended (not saved yet).");
+  }
+
+  async function copyAi() {
+    try {
+      await navigator.clipboard.writeText(aiOut || "");
+      setStatus("Copied AI output.");
+    } catch {
+      setAiErr("Could not copy to clipboard.");
+    }
   }
 
   return (
@@ -194,6 +269,8 @@ export default function ChapterEditor({
               setEditing(true);
               setStatus(null);
               setError(null);
+              setAiOut("");
+              setAiErr(null);
             }}
             className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
           >
@@ -204,7 +281,7 @@ export default function ChapterEditor({
             <button
               type="button"
               onClick={handleCancel}
-              disabled={saving || finalizing}
+              disabled={saving || finalizing || aiBusy}
               className="rounded-md border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-800 disabled:opacity-50"
             >
               Cancel
@@ -213,7 +290,7 @@ export default function ChapterEditor({
             <button
               type="button"
               onClick={handleSaveDraftNow}
-              disabled={saving || finalizing}
+              disabled={saving || finalizing || aiBusy}
               className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save draft"}
@@ -222,7 +299,7 @@ export default function ChapterEditor({
             <button
               type="button"
               onClick={handleFinalize}
-              disabled={saving || finalizing}
+              disabled={saving || finalizing || aiBusy}
               className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
             >
               {finalizing ? "Finalizing…" : "Finalize / Publish"}
@@ -258,6 +335,126 @@ export default function ChapterEditor({
             value={content}
             onChange={(e) => setContent(e.target.value)}
           />
+
+          {/* ✅ AI tools panel */}
+          <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-[0.25em] text-indigo-300">
+                  AI Assist
+                </p>
+                <p className="text-xs text-gray-400">
+                  Fix grammar, rewrite, continue, or get suggestions (preview before applying).
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={aiMode}
+                  onChange={(e) => setAiMode(e.target.value as AiMode)}
+                  className="rounded-md border border-gray-700 bg-slate-950 px-3 py-2 text-xs text-gray-100"
+                >
+                  <option value="fix">Fix typos / grammar</option>
+                  <option value="rewrite">Rewrite (stronger prose)</option>
+                  <option value="continue">Continue scene</option>
+                  <option value="suggest">Suggestions only</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={runAi}
+                  disabled={aiBusy || saving || finalizing}
+                  className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  {aiBusy ? "Running…" : "Run AI"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <label className="block text-[11px] uppercase tracking-[0.2em] text-gray-400">
+                Optional instruction
+              </label>
+              <input
+                value={aiInstruction}
+                onChange={(e) => setAiInstruction(e.target.value)}
+                placeholder='e.g. "keep it ruthless", "make dialogue snappier", "remove purple prose"'
+                className="mt-1 w-full rounded-md border border-gray-700 bg-slate-950 px-3 py-2 text-xs text-gray-100"
+              />
+            </div>
+
+            {(aiErr || aiOut) && (
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/40 p-3">
+                {aiErr && <p className="text-xs text-red-300">{aiErr}</p>}
+
+                {aiOut && (
+                  <>
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400">
+                      Output preview
+                    </p>
+
+                    <div className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-sm text-gray-200">
+                      {aiOut}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {aiMode === "continue" ? (
+                        <button
+                          type="button"
+                          onClick={applyAiAppend}
+                          className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                        >
+                          Append to chapter
+                        </button>
+                      ) : aiMode === "suggest" ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // suggestions shouldn’t auto-replace the chapter
+                            setStatus("Review suggestions above. No changes applied.");
+                          }}
+                          className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/10"
+                        >
+                          OK
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={applyAiReplace}
+                          className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                        >
+                          Replace chapter text
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={copyAi}
+                        className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/10"
+                      >
+                        Copy
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAiOut("");
+                          setAiErr(null);
+                        }}
+                        className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/10"
+                      >
+                        Clear
+                      </button>
+                    </div>
+
+                    <p className="mt-2 text-[11px] text-gray-500">
+                      Applying AI changes only updates the editor. You still control Save/Finalize.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <p className="text-xs text-gray-500">

@@ -1,11 +1,12 @@
+// app/api/unbookmark/route.ts
 import { NextResponse } from "next/server";
-import { getSupabaseServer } from "@/lib/supabase";
+import { supabaseServerClient } from "@/lib/supabaseServerSSR";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
-    const sb = getSupabaseServer();
+    const sb = await supabaseServerClient(); // ✅ cookie-aware
 
     const { data: userData, error: userErr } = await sb.auth.getUser();
     if (userErr || !userData?.user) {
@@ -17,13 +18,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing storyId" }, { status: 400 });
     }
 
-    const { error } = await sb.from("story_bookmarks").insert({
-      user_id: userData.user.id,
-      story_id: storyId,
-    });
+    const { error } = await sb
+      .from("story_bookmarks")
+      .delete()
+      .eq("user_id", userData.user.id)
+      .eq("story_id", storyId);
 
-    // duplicate bookmark = fine
-    if (error && !String(error.message || "").toLowerCase().includes("duplicate")) {
+    if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 

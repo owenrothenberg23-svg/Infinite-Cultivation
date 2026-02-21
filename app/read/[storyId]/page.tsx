@@ -1,5 +1,6 @@
 // app/read/[storyId]/page.tsx
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { getSupabaseServer } from "@/lib/supabase";
 import GenerateButton from "@/components/GenerateButton";
 import PublishStoryPanel from "@/components/PublishStoryPanel";
@@ -11,19 +12,22 @@ export default async function StoryPage({
 }: {
   params: Promise<Params> | Params;
 }) {
-  // Handle Next 16 promise-style params
   const p = (await (params as any)) as Params;
   const storyId = p.storyId;
 
-  // ✅ IMPORTANT: create server client per-request
   const sb = getSupabaseServer();
 
-  // Load story (now including public fields + author)
+  // who is viewing?
+  const { data: userData } = await sb.auth.getUser();
+  const viewerId = userData?.user?.id ?? null;
+
+  // Load story INCLUDING user_id so we can determine ownership
   const { data: story } = await sb
     .from("stories")
     .select(
       `
         id,
+        user_id,
         title,
         last_chapter_number,
         is_public,
@@ -35,23 +39,19 @@ export default async function StoryPage({
     .eq("id", storyId)
     .single();
 
-  // Load chapters
+  if (!story) return notFound();
+
+  const isOwner = !!viewerId && story.user_id === viewerId;
+
+  // If not owner AND not public → hide it
+  if (!isOwner && !story.is_public) return notFound();
+
+  // Chapters (RLS will also protect this)
   const { data: chapters } = await sb
     .from("chapters")
     .select("id, chapter_number, title, created_at")
     .eq("story_id", storyId)
     .order("chapter_number", { ascending: true });
-
-  if (!story) {
-    return (
-      <main className="max-w-3xl mx-auto p-8 text-gray-200">
-        <h1 className="text-2xl font-bold mb-4">Story not found</h1>
-        <Link href="/" className="text-indigo-400 hover:underline">
-          Back to My Stories
-        </Link>
-      </main>
-    );
-  }
 
   const lastNum = story.last_chapter_number ?? 0;
   const nextNumber = lastNum + 1;
@@ -62,16 +62,10 @@ export default async function StoryPage({
   return (
     <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-8">
       <header className="space-y-3">
-        {/* ✅ NEW (safe): show cover if present */}
         {cover ? (
           <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={cover}
-              alt=""
-              className="h-48 w-full object-cover"
-              loading="lazy"
-            />
+            <img src={cover} alt="" className="h-48 w-full object-cover" loading="lazy" />
           </div>
         ) : null}
 
@@ -79,9 +73,8 @@ export default async function StoryPage({
           <div className="space-y-1">
             <h1 className="text-3xl font-bold">{story.title}</h1>
 
-            {/* tiny "creator dashboard" hint */}
             <p className="text-xs uppercase tracking-[0.25em] text-gray-500">
-              Creator Dashboard
+              {isOwner ? "Creator Dashboard" : "Reader View"}
             </p>
 
             {story.author_username && (
@@ -99,7 +92,6 @@ export default async function StoryPage({
           )}
         </div>
 
-        {/* publish state */}
         {story.is_public ? (
           <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
             Published in Library
@@ -110,19 +102,18 @@ export default async function StoryPage({
           </span>
         )}
 
-        {/* micro-stats */}
         <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
           <span>
             Chapters: <span className="text-gray-200">{lastNum}</span>
           </span>
-          <span>
-            Next: <span className="text-gray-200">Chapter {nextNumber}</span>
-          </span>
+          {isOwner && (
+            <span>
+              Next: <span className="text-gray-200">Chapter {nextNumber}</span>
+            </span>
+          )}
         </div>
 
-        {story.public_summary && (
-          <p className="text-sm text-gray-300">{story.public_summary}</p>
-        )}
+        {story.public_summary && <p className="text-sm text-gray-300">{story.public_summary}</p>}
       </header>
 
       <section>
@@ -136,35 +127,33 @@ export default async function StoryPage({
                   href={`/read/${storyId}/chapter/${ch.chapter_number}`}
                   className="block rounded-md border border-white/5 bg-white/5 px-3 py-2 text-gray-300 hover:text-white hover:bg-white/10 hover:border-indigo-500 transition"
                 >
-                  <span className="font-medium">
-                    Chapter {ch.chapter_number}
-                  </span>
-                  <span className="text-gray-400">
-                    {" "}
-                    — {ch.title || "Untitled"}
-                  </span>
+                  <span className="font-medium">Chapter {ch.chapter_number}</span>
+                  <span className="text-gray-400"> — {ch.title || "Untitled"}</span>
                 </Link>
               </li>
             ))
           ) : (
-            <li className="text-gray-500">
-              No chapters yet. Generate your first chapter to begin the saga.
-            </li>
+            <li className="text-gray-500">No chapters yet.</li>
           )}
         </ul>
 
-        <div className="mt-6">
-          <GenerateButton storyId={storyId} nextNumber={nextNumber} />
-        </div>
+        {/* ✅ ONLY owners can generate */}
+        {isOwner && (
+          <div className="mt-6">
+            <GenerateButton storyId={storyId} nextNumber={nextNumber} />
+          </div>
+        )}
       </section>
 
-      {/* Publish / update public summary */}
-      <PublishStoryPanel
-        storyId={storyId}
-        initialSummary={story.public_summary}
-        initialCoverUrl={story.cover_image_url ?? null} // ✅ NEW
-        isAlreadyPublic={!!story.is_public}
-      />
+      {/* ✅ ONLY owners can publish/edit metadata */}
+      {isOwner && (
+        <PublishStoryPanel
+          storyId={storyId}
+          initialSummary={story.public_summary}
+          initialCoverUrl={story.cover_image_url ?? null}
+          isAlreadyPublic={!!story.is_public}
+        />
+      )}
     </main>
   );
 }
