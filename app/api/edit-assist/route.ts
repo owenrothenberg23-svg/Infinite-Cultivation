@@ -1,22 +1,27 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { getSupabaseServer } from "@/lib/supabase";
+import { supabaseServerClient } from "@/lib/supabaseServerSSR";
 
 export const runtime = "nodejs";
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 
+// Helpful: if anything calls GET by accident, return a clear message (instead of generic 405 page)
+export async function GET() {
+  return NextResponse.json(
+    { error: "Method not allowed. Use POST /api/edit-assist" },
+    { status: 405 }
+  );
+}
+
 export async function POST(req: Request) {
   try {
-    const sb = getSupabaseServer();
-
-    // ✅ COOKIE-BASED AUTH (NOT Bearer)
+    // ✅ Cookie-based SSR auth (same helper you use on dashboard)
+    const sb = await supabaseServerClient();
     const { data: userData, error: userErr } = await sb.auth.getUser();
+
     if (userErr || !userData?.user) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));
@@ -24,17 +29,10 @@ export async function POST(req: Request) {
       text,
       mode,
       instruction,
-    }: {
-      text?: string;
-      mode?: string;
-      instruction?: string;
-    } = body;
+    }: { text?: string; mode?: string; instruction?: string } = body;
 
     if (!text || !text.trim()) {
-      return NextResponse.json(
-        { error: "Missing text" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing text" }, { status: 400 });
     }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -48,31 +46,24 @@ export async function POST(req: Request) {
     const anthropic = new Anthropic({ apiKey });
 
     let systemPrompt = "";
-
     switch (mode) {
       case "grammar":
         systemPrompt =
           "You are a professional line editor. Fix grammar and typos only. Do NOT change tone or structure.";
         break;
-
       case "rewrite":
         systemPrompt =
           "Rewrite this chapter to improve flow and clarity while preserving meaning.";
         break;
-
       case "continue":
-        systemPrompt =
-          "Continue writing the chapter naturally from where it ends.";
+        systemPrompt = "Continue writing the chapter naturally from where it ends.";
         break;
-
       case "suggest":
         systemPrompt =
           "Provide actionable writing suggestions, do NOT rewrite the text.";
         break;
-
       default:
-        systemPrompt =
-          "You are a professional editor. Improve clarity and polish.";
+        systemPrompt = "You are a professional editor. Improve clarity and polish.";
     }
 
     if (instruction && instruction.trim()) {
@@ -84,12 +75,7 @@ export async function POST(req: Request) {
       max_tokens: 3000,
       temperature: 0.3,
       system: systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text }],
-        },
-      ],
+      messages: [{ role: "user", content: [{ type: "text", text }] }],
     });
 
     const blocks = Array.isArray(msg?.content) ? msg.content : [];

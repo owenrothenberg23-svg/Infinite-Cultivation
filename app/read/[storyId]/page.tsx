@@ -1,32 +1,53 @@
 // app/read/[storyId]/page.tsx
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getSupabaseServer } from "@/lib/supabase";
+import { supabaseServerClient } from "@/lib/supabaseServerSSR";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import GenerateButton from "@/components/GenerateButton";
 import PublishStoryPanel from "@/components/PublishStoryPanel";
 
 type Params = { storyId: string };
 
+type StoryRow = {
+  id: string;
+  user_id: string | null;
+  author_id: string | null;
+  title: string;
+  last_chapter_number: number | null;
+  is_public: boolean | null;
+  public_summary: string | null;
+  cover_image_url: string | null;
+  author_username: string | null;
+  view_count: number | null;
+};
+
+export const dynamic = "force-dynamic";
+
 export default async function StoryPage({
   params,
 }: {
   params: Promise<Params> | Params;
 }) {
-  const p = (await (params as any)) as Params;
+  // Next 15/16 safe params resolve
+  const p =
+    typeof (params as any)?.then === "function"
+      ? (((await params) as any) ?? ({} as Params))
+      : ((params as any) ?? ({} as Params));
+
   const storyId = p.storyId;
 
-  const sb = getSupabaseServer();
+  const sb = await supabaseServerClient();
 
   const { data: userData } = await sb.auth.getUser();
   const viewerId = userData?.user?.id ?? null;
 
-  const { data: story } = await sb
+  const { data: story, error: storyErr } = await sb
     .from("stories")
     .select(
       `
         id,
         user_id,
+        author_id,
         title,
         last_chapter_number,
         is_public,
@@ -37,53 +58,66 @@ export default async function StoryPage({
       `
     )
     .eq("id", storyId)
-    .single();
+    .maybeSingle();
 
-  if (!story) return notFound();
+  if (storyErr || !story) return notFound();
 
-  const isOwner = !!viewerId && story.user_id === viewerId;
+  const s = story as StoryRow;
 
-  if (!isOwner && !story.is_public) return notFound();
+  // Support both schemas: some tables use user_id, some use author_id
+  const isOwner =
+    !!viewerId && (s.user_id === viewerId || s.author_id === viewerId);
+
+  if (!isOwner && !s.is_public) return notFound();
 
   // ✅ Increment view count (only public + not owner)
-  if (story.is_public && !isOwner) {
+  // NOTE: This is not perfectly race-safe, but good enough for now.
+  let didIncrementView = false;
+  if (s.is_public && !isOwner) {
     const admin = supabaseAdmin();
-    await admin
+    const current = Number(s.view_count ?? 0);
+
+    const { error: incErr } = await admin
       .from("stories")
-      .update({ view_count: (story.view_count ?? 0) + 1 })
+      .update({ view_count: current + 1 })
       .eq("id", storyId);
+
+    didIncrementView = !incErr;
   }
 
-  const { data: chapters } = await sb
+  const { data: chapters, error: chErr } = await sb
     .from("chapters")
     .select("id, chapter_number, title, created_at")
     .eq("story_id", storyId)
     .order("chapter_number", { ascending: true });
 
-  const lastNum = story.last_chapter_number ?? 0;
+  const lastNum = s.last_chapter_number ?? 0;
   const nextNumber = lastNum + 1;
-  const hasChapters = !!chapters?.length;
-  const cover = (story.cover_image_url || "").trim();
+  const hasChapters = Array.isArray(chapters) && chapters.length > 0;
+  const cover = (s.cover_image_url || "").trim();
+
+  const viewsBase = Number(s.view_count ?? 0);
+  const viewsDisplay =
+    !isOwner && s.is_public ? viewsBase + (didIncrementView ? 1 : 0) : viewsBase;
 
   return (
     <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-8">
       <header className="space-y-3">
         {cover && (
           <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={cover} alt="" className="h-48 w-full object-cover" />
           </div>
         )}
 
         <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-3xl font-bold">{story.title}</h1>
+          <div className="space-y-1 min-w-0">
+            <h1 className="text-3xl font-bold truncate">{s.title}</h1>
             <p className="text-xs uppercase tracking-[0.25em] text-gray-500">
               {isOwner ? "Creator Dashboard" : "Reader View"}
             </p>
-            {story.author_username && (
-              <p className="text-sm text-gray-400">
-                by {story.author_username}
-              </p>
+            {s.author_username && (
+              <p className="text-sm text-gray-400">by {s.author_username}</p>
             )}
           </div>
 
@@ -97,7 +131,7 @@ export default async function StoryPage({
           )}
         </div>
 
-        {story.is_public ? (
+        {s.is_public ? (
           <span className="inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-300">
             Published in Library
           </span>
@@ -111,18 +145,22 @@ export default async function StoryPage({
           <span>
             Chapters: <span className="text-gray-200">{lastNum}</span>
           </span>
-          {!isOwner && (
+
+          {!isOwner && s.is_public && (
             <span>
-              Views:{" "}
-              <span className="text-gray-200">
-                {(story.view_count ?? 0) + 1}
-              </span>
+              Views: <span className="text-gray-200">{viewsDisplay}</span>
+            </span>
+          )}
+
+          {chErr && (
+            <span className="text-red-300">
+              Failed to load chapters: {chErr.message}
             </span>
           )}
         </div>
 
-        {story.public_summary && (
-          <p className="text-sm text-gray-300">{story.public_summary}</p>
+        {s.public_summary && (
+          <p className="text-sm text-gray-300">{s.public_summary}</p>
         )}
       </header>
 
@@ -137,9 +175,7 @@ export default async function StoryPage({
                   href={`/read/${storyId}/chapter/${ch.chapter_number}`}
                   className="block rounded-md border border-white/5 bg-white/5 px-3 py-2 hover:border-indigo-500 hover:bg-white/10"
                 >
-                  <span className="font-medium">
-                    Chapter {ch.chapter_number}
-                  </span>
+                  <span className="font-medium">Chapter {ch.chapter_number}</span>
                   <span className="text-gray-400">
                     {" "}
                     — {ch.title || "Untitled"}
@@ -162,9 +198,9 @@ export default async function StoryPage({
       {isOwner && (
         <PublishStoryPanel
           storyId={storyId}
-          initialSummary={story.public_summary}
-          initialCoverUrl={story.cover_image_url ?? null}
-          isAlreadyPublic={!!story.is_public}
+          initialSummary={s.public_summary}
+          initialCoverUrl={s.cover_image_url ?? null}
+          isAlreadyPublic={!!s.is_public}
         />
       )}
     </main>

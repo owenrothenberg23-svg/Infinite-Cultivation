@@ -21,7 +21,7 @@ type Row = {
   comments_30d: number;
 };
 
-type BookmarkRow = {
+type AnalyticsAggRow = {
   story_id: string;
   bookmark_count: number;
 };
@@ -48,10 +48,14 @@ export default async function AnalyticsDashboardPage() {
     );
   }
 
-  const { data, error } = await sb.rpc("author_analytics_summary");
+  // ✅ Call the overloaded function explicitly with args so PostgREST resolves it reliably
+  const { data, error } = await sb.rpc("author_analytics_summary", {
+    p_user_id: user.id,
+  });
+
   const rows = (data as Row[] | null) ?? [];
 
-  // Fetch bookmark counts (and other aggregates) in one shot, then merge
+  // Fetch bookmark counts in one shot, then merge
   const storyIds = rows.map((r) => r.story_id).filter(Boolean);
   let bookmarkByStory: Record<string, number> = {};
 
@@ -61,7 +65,7 @@ export default async function AnalyticsDashboardPage() {
     });
 
     if (!aggErr && Array.isArray(aggData)) {
-      bookmarkByStory = (aggData as BookmarkRow[]).reduce<Record<string, number>>(
+      bookmarkByStory = (aggData as AnalyticsAggRow[]).reduce<Record<string, number>>(
         (acc, cur) => {
           acc[cur.story_id] = Number(cur.bookmark_count ?? 0);
           return acc;
@@ -90,12 +94,19 @@ export default async function AnalyticsDashboardPage() {
       </header>
 
       {error && (
-        <p className="mb-4 text-sm text-red-400">Failed to load analytics.</p>
+        <p className="mb-4 text-sm text-red-400">
+          Failed to load analytics: {error.message}
+        </p>
       )}
 
-      {rows.length === 0 ? (
+      {!error && rows.length === 0 ? (
         <p className="mt-8 text-sm text-gray-400">
           No stories yet — publish or create one to start seeing analytics.
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="mt-8 text-sm text-gray-400">
+          No analytics rows returned (but you are logged in). This usually means
+          your RPC is filtering on the wrong author column (user_id vs author_id).
         </p>
       ) : (
         <ul className="space-y-4">

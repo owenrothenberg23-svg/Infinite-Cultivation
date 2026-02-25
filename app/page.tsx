@@ -11,7 +11,9 @@ export default function HomePage() {
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/5 text-sm font-bold">
               IC
             </span>
-            <span className="font-semibold tracking-tight">Infinite Cultivation</span>
+            <span className="font-semibold tracking-tight">
+              Infinite Cultivation
+            </span>
           </Link>
 
           <nav className="hidden items-center gap-6 text-sm text-gray-300 sm:flex">
@@ -34,13 +36,13 @@ export default function HomePage() {
               href="/library"
               className="rounded-md border border-white/10 px-4 py-2 text-xs font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
             >
-              Enter Library
+              Browse Library
             </Link>
             <Link
-              href="/library"
+              href="/new"
               className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow hover:bg-indigo-500"
             >
-              Read featured
+              Start writing
             </Link>
           </div>
         </div>
@@ -65,29 +67,29 @@ export default function HomePage() {
 
             <p className="max-w-xl text-sm text-gray-300 sm:text-base leading-relaxed">
               Infinite Cultivation is a home for long-form progression fantasy—built
-              for readers, and powered with modern tools for creators. Titles, spirit
-              stones, and a growing library of sagas designed to scale.
+              for readers, with author-first publishing tools and optional creator
+              assistance. A growing library of sagas designed for hundreds of
+              chapters.
             </p>
 
             <div className="flex flex-wrap gap-4">
-              {/* Primary CTA = Read featured */}
               <Link
                 href="/library"
                 className="rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-indigo-500"
               >
-                Read featured
-              </Link>
-              <Link
-                href="/library"
-                className="rounded-md border border-white/10 px-5 py-2.5 text-sm font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
-              >
-                Enter the Library
+                Browse the Library
               </Link>
               <Link
                 href="/new"
                 className="rounded-md border border-white/10 px-5 py-2.5 text-sm font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
               >
                 Start writing
+              </Link>
+              <Link
+                href="/dashboard"
+                className="rounded-md border border-white/10 px-5 py-2.5 text-sm font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
+              >
+                Creator dashboard
               </Link>
             </div>
 
@@ -116,109 +118,77 @@ export default function HomePage() {
             </dl>
           </div>
 
-          {/* Right: 3 featured “cards” (covers) */}
+          {/* Right: Founding authors callout (replaces fake featured cards) */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-100">Featured right now</h2>
-              <Link href="/library" className="text-xs text-indigo-400 hover:underline">
-                View all →
-              </Link>
+              <h2 className="text-sm font-semibold text-gray-100">
+                Founding authors (3–5)
+              </h2>
+              <span className="text-xs text-gray-400">Closed beta</span>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-              {/* Card 1 */}
-              <Link
-                href="/library"
-                className="group overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg hover:border-indigo-500"
-              >
-                <div className="relative h-36 w-full">
-                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/40 via-sky-500/20 to-emerald-500/20" />
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.18),transparent_45%)]" />
-                  <div className="absolute bottom-3 left-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px] text-indigo-200">
-                    Xianxia · 143 ch
-                  </div>
-                </div>
-                <div className="p-3">
-                  <div className="text-sm font-semibold text-white group-hover:text-white">
-                    The Jade Tyrant’s Ascension
-                  </div>
-                  <div className="mt-1 text-xs text-gray-400">by Founding Author</div>
-                  <p className="mt-2 text-xs text-gray-300 line-clamp-2">
-                    Betrayed by his sect, he inherits a forbidden scripture—and the world
-                    begins to remember his name.
-                  </p>
-                </div>
-              </Link>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg">
+              <p className="text-xs uppercase tracking-[0.25em] text-indigo-300">
+                Early creator program
+              </p>
+              <h3 className="mt-2 text-xl font-bold text-white">
+                Publish where authors actually get treated right.
+              </h3>
+              <p className="mt-2 text-sm text-gray-300 leading-relaxed">
+                We’re recruiting a small group of serious cultivation writers to
+                help shape the platform. Better terms, real analytics, and guaranteed
+                visibility while the library is small.
+              </p>
 
-              {/* Card 2 */}
-              <Link
-                href="/library"
-                className="group overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg hover:border-indigo-500"
-              >
-                <div className="relative h-36 w-full">
-                  <div className="absolute inset-0 bg-gradient-to-br from-fuchsia-500/30 via-indigo-500/20 to-cyan-500/20" />
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_30%,rgba(255,255,255,0.16),transparent_48%)]" />
-                  <div className="absolute bottom-3 left-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px] text-indigo-200">
-                    System · 97 ch
-                  </div>
-                </div>
-                <div className="p-3">
-                  <div className="text-sm font-semibold text-white">Heavenly System: Iron Oath</div>
-                  <div className="mt-1 text-xs text-gray-400">by Founding Author</div>
-                  <p className="mt-2 text-xs text-gray-300 line-clamp-2">
-                    A ruthless progression system, impossible quests, and a protagonist who refuses
-                    to kneel—ever.
-                  </p>
-                </div>
-              </Link>
+              <ul className="mt-4 space-y-2 text-sm text-gray-300">
+                <li className="flex gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                  Author-first terms vs. legacy platforms
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                  Featured placement for founding stories
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                  Optional refinement helpers, never required
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                  Direct input on features + roadmap
+                </li>
+              </ul>
 
-              {/* Card 3 */}
-              <Link
-                href="/library"
-                className="group overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg hover:border-indigo-500"
-              >
-                <div className="relative h-36 w-full">
-                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/25 via-sky-500/15 to-indigo-500/25" />
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_40%_60%,rgba(255,255,255,0.14),transparent_52%)]" />
-                  <div className="absolute bottom-3 left-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px] text-indigo-200">
-                    Grimdark · 212 ch
-                  </div>
-                </div>
-                <div className="p-3">
-                  <div className="text-sm font-semibold text-white">The Sects Will Burn</div>
-                  <div className="mt-1 text-xs text-gray-400">by Founding Author</div>
-                  <p className="mt-2 text-xs text-gray-300 line-clamp-2">
-                    Every betrayal has a price. Every technique has a cost. The Dao is cruel—and so
-                    is he.
-                  </p>
-                </div>
-              </Link>
-            </div>
-
-            {/* Small helper CTA */}
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-white">Want to publish here?</p>
-                  <p className="text-xs text-gray-400">
-                    Founding beta perks + permanent titles for early creators.
-                  </p>
-                </div>
-                <div className="flex gap-3">
-                  <Link
-                    href="/new"
-                    className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
-                  >
-                    Apply / start writing
-                  </Link>
-                  <Link
-                    href="/dashboard"
-                    className="rounded-md border border-white/10 px-4 py-2 text-xs font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
-                  >
-                    Creator dashboard
-                  </Link>
-                </div>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  href="/new"
+                  className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
+                >
+                  Apply / start writing
+                </Link>
+                <Link
+                  href="/dashboard"
+                  className="rounded-md border border-white/10 px-4 py-2 text-xs font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
+                >
+                  Creator dashboard
+                </Link>
+                <Link
+                  href="/library"
+                  className="rounded-md border border-white/10 px-4 py-2 text-xs font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
+                >
+                  Browse stories
+                </Link>
               </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+              <p className="text-sm font-semibold text-white">
+                Already have a long backlog?
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                If you’re bringing an existing story (100+ chapters), we’ll help you
+                get set up fast.
+              </p>
             </div>
           </div>
         </div>
@@ -228,7 +198,9 @@ export default function HomePage() {
       <section className="mx-auto max-w-6xl px-4 pb-14">
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h3 className="text-sm font-semibold text-white">A reader progression loop</h3>
+            <h3 className="text-sm font-semibold text-white">
+              A reader progression loop
+            </h3>
             <p className="mt-2 text-sm text-gray-300 leading-relaxed">
               Gain titles, earn spirit stones, and build reputation as you binge and
               support the sagas you love.
@@ -253,7 +225,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* For Authors (AI mentioned but not the headline) */}
+      {/* For Authors (kept) */}
       <section className="mx-auto max-w-6xl px-4 pb-16">
         <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-black/20 p-6">
           <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
@@ -300,7 +272,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* “How it works” (kept, but reframed so AI isn’t the hook) */}
+            {/* How it works */}
             <div className="rounded-2xl border border-white/10 bg-black/30 p-5 shadow-lg">
               <h3 className="text-sm font-semibold text-gray-100">How it works</h3>
               <ol className="mt-3 space-y-3 text-sm text-gray-300">
@@ -327,9 +299,8 @@ export default function HomePage() {
                   <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">
                     4
                   </span>
-                  Publish to the{" "}
-                  <span className="font-semibold">Library</span> so other cultivators
-                  can read and follow.
+                  Publish to the <span className="font-semibold">Library</span> so
+                  other cultivators can read and follow.
                 </li>
               </ol>
 
@@ -350,7 +321,6 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* tiny beta note */}
           <p className="mt-6 text-xs text-gray-500">
             Closed beta: early cultivators receive permanent founding titles and can shape the
             platform’s progression systems.

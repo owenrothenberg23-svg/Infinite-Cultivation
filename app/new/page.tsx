@@ -19,8 +19,13 @@ type Mode = "manual" | "ai";
 
 export default function NewStoryPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("ai");
+
+  // Pivot: default to manual (human-first)
+  const [mode, setMode] = useState<Mode>("manual");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // AI preferences visibility (prevents "AI platform" vibe)
+  const [showAiPrefs, setShowAiPrefs] = useState(false);
 
   // Tag UI state
   const [tagInput, setTagInput] = useState("");
@@ -109,16 +114,37 @@ export default function NewStoryPage() {
 
   return (
     <>
-      <main className="max-w-2xl mx-auto p-8 text-gray-200">
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <h1 className="text-3xl font-bold">Create a New Story</h1>
+      <main className="mx-auto max-w-2xl px-4 pt-6 pb-10 text-gray-200 sm:px-6 sm:pt-8">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold">Create a New Story</h1>
+            <p className="mt-1 text-sm text-gray-400">
+              Human-first publishing. Optional assist tools—never required.
+            </p>
+          </div>
+
           <Link href="/" className="text-sm text-gray-400 hover:text-white">
             ← Back
           </Link>
         </div>
 
         {/* Mode tabs */}
-        <div className="mb-4 flex gap-2">
+        <div className="mb-3 flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setMode("manual");
+              setShowAiPrefs(false);
+            }}
+            className={`rounded-md px-3 py-1.5 text-sm border ${
+              mode === "manual"
+                ? "bg-emerald-600 border-emerald-400 text-white"
+                : "bg-white/5 border-white/10 text-gray-200 hover:bg-white/10"
+            }`}
+          >
+            Write manually
+          </button>
+
           <button
             type="button"
             onClick={() => setMode("ai")}
@@ -128,30 +154,19 @@ export default function NewStoryPage() {
                 : "bg-white/5 border-white/10 text-gray-200 hover:bg-white/10"
             }`}
           >
-            AI-assisted
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("manual")}
-            className={`rounded-md px-3 py-1.5 text-sm border ${
-              mode === "manual"
-                ? "bg-emerald-600 border-emerald-400 text-white"
-                : "bg-white/5 border-white/10 text-gray-200 hover:bg-white/10"
-            }`}
-          >
-            Write manually
+            Optional assist
           </button>
         </div>
 
-        <p className="mb-6 text-sm text-gray-400">
-          {mode === "ai"
-            ? "Use AI to help kickstart your saga. You’ll still be able to edit everything afterward."
-            : "Create a story and start writing Chapter 1 immediately. AI tools will be available inside the editor (optional)."}
+        <p className="mb-5 text-sm text-gray-400">
+          {mode === "manual"
+            ? "Create your story and start writing. You’re always in control."
+            : "Use optional tools to help with early direction or refinement. You can edit everything afterward."}
         </p>
 
         <form
           onSubmit={handleSubmit}
-          className="space-y-6 bg-white/5 p-6 rounded-lg border border-white/10"
+          className="space-y-6 rounded-lg border border-white/10 bg-white/5 p-6"
         >
           {/* Title */}
           <label className="block text-sm">
@@ -160,23 +175,24 @@ export default function NewStoryPage() {
               name="title"
               required
               placeholder="Heaven-Splitting Demon Emperor"
-              className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
+              className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
             />
           </label>
 
           {/* Story pitch */}
           <label className="block text-sm">
             <span className="block mb-1 text-gray-300">
-              Story Pitch (what you want this book to be)
+              Story Pitch (your “north star”)
             </span>
             <textarea
               name="story_pitch"
               rows={6}
               placeholder="Example: A cunning outer-sect disciple with a hidden body-tempering art seeks revenge via politics, not brute force..."
-              className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
+              className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
             />
             <span className="block mt-1 text-xs text-gray-400">
-              Tip: 2–8 sentences. This becomes a permanent north star for the plot.
+              Tip: 2–8 sentences. This stays attached to the story so your tone and
+              direction remain consistent.
             </span>
           </label>
 
@@ -189,7 +205,7 @@ export default function NewStoryPage() {
             <select
               name="primary_genre"
               defaultValue=""
-              className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
+              className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
             >
               {GENRES_FOR_LIBRARY.map((g) => (
                 <option key={g.value || "none"} value={g.value}>
@@ -199,168 +215,194 @@ export default function NewStoryPage() {
             </select>
           </label>
 
-          {/* Only show the big AI preference fields when in AI mode */}
+          {/* AI: preferences collapsed behind toggle */}
           {mode === "ai" && (
-            <>
-              {/* Tone */}
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-300">Tone</span>
-                <select
-                  name="tone"
-                  defaultValue="epic"
-                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
-                >
-                  <option value="epic">Epic / Grand</option>
-                  <option value="ruthless">Ruthless / Grim</option>
-                  <option value="arrogant">Arrogant / Comedic</option>
-                  <option value="enlightened">Calm / Dao-Comprehension</option>
-                  <option value="schemer">Schemer / Strategist</option>
-                </select>
-              </label>
-
-              {/* World type */}
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-300">World Type</span>
-                <select
-                  name="world_type"
-                  defaultValue="xianxia_high"
-                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
-                >
-                  <option value="wuxia_low">Wuxia (Low Fantasy)</option>
-                  <option value="xianxia_high">Xianxia (High Cultivation)</option>
-                  <option value="xuanhuan">Xuanhuan (Eastern-Western Blend)</option>
-                  <option value="modern_urban">Modern / Urban Cultivation</option>
-                  <option value="sci_fantasy">Sci-Fantasy Cultivation</option>
-                </select>
-              </label>
-
-              {/* MC personality */}
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-300">MC Personality</span>
-                <select
-                  name="mc_personality"
-                  defaultValue="steadfast"
-                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
-                >
-                  <option value="ruthless">Ruthless</option>
-                  <option value="steadfast">Steadfast / Noble</option>
-                  <option value="playful">Playful / Troll</option>
-                  <option value="cunning">Cunning / Planner</option>
-                  <option value="compassionate">Compassionate</option>
-                </select>
-              </label>
-
-              {/* OP level */}
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-300">OP Level</span>
-                <select
-                  name="op_level"
-                  defaultValue="balanced"
-                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
-                >
-                  <option value="struggle">Struggle (Underpowered)</option>
-                  <option value="balanced">Balanced Growth</option>
-                  <option value="overpowered">Overpowered (OP)</option>
-                </select>
-              </label>
-
-              {/* Romance level */}
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-300">Romance Level</span>
-                <select
-                  name="romance_level"
-                  defaultValue="subplot"
-                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
-                >
-                  <option value="none">None</option>
-                  <option value="slow_burn">Slow Burn</option>
-                  <option value="subplot">Subplot</option>
-                  <option value="harem_light">Harem-Light</option>
-                </select>
-              </label>
-
-              {/* Violence level */}
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-300">Violence Level</span>
-                <select
-                  name="violence_level"
-                  defaultValue="balanced"
-                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
-                >
-                  <option value="low">Low</option>
-                  <option value="balanced">Balanced</option>
-                  <option value="savage">Savage</option>
-                </select>
-              </label>
-
-              {/* Power progression */}
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-300">Power Progression</span>
-                <select
-                  name="power_progression"
-                  defaultValue="steady"
-                  className="mt-1 w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-gray-100"
-                >
-                  <option value="slow">Slow</option>
-                  <option value="steady">Steady</option>
-                  <option value="fast">Fast</option>
-                </select>
-              </label>
-
-              {/* Genres / Themes */}
-              <fieldset className="border border-gray-700 rounded p-3">
-                <legend className="text-sm text-gray-300 px-1">
-                  Genres / Themes (choose a few)
-                </legend>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="genres" value="revenge" />
-                    <span>Revenge</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="genres" value="sect_politics" />
-                    <span>Sect politics</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="genres" value="system" />
-                    <span>System / Status Screen</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="genres" value="face_slapping" />
-                    <span>Face-slapping</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="genres" value="slow_cultivation" />
-                    <span>Slow cultivation</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="genres" value="comedy" />
-                    <span>Comedy</span>
-                  </label>
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">
+                    Optional assist preferences
+                  </p>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Only affects the initial kickstart. You can edit everything after
+                    creation.
+                  </p>
                 </div>
-              </fieldset>
 
-              {/* Optional flags */}
-              <fieldset className="border border-gray-700 rounded p-3">
-                <legend className="text-sm text-gray-300 px-1">Optional Tropes</legend>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="flag_system_cheats" value="1" />
-                  <span>System / Cheats</span>
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="flag_transmigration" value="1" />
-                  <span>Transmigration / Reincarnation</span>
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="flag_comedy" value="1" />
-                  <span>Comedy Emphasis</span>
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="flag_grimdark" value="1" />
-                  <span>Grimdark Undertones</span>
-                </label>
-              </fieldset>
-            </>
+                <button
+                  type="button"
+                  onClick={() => setShowAiPrefs((v) => !v)}
+                  className="shrink-0 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
+                >
+                  {showAiPrefs ? "Hide" : "Show"}
+                </button>
+              </div>
+
+              {showAiPrefs && (
+                <div className="mt-4 space-y-5">
+                  {/* Tone */}
+                  <label className="block text-sm">
+                    <span className="block mb-1 text-gray-300">Tone</span>
+                    <select
+                      name="tone"
+                      defaultValue="epic"
+                      className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
+                    >
+                      <option value="epic">Epic / Grand</option>
+                      <option value="ruthless">Ruthless / Grim</option>
+                      <option value="arrogant">Arrogant / Comedic</option>
+                      <option value="enlightened">Calm / Dao-Comprehension</option>
+                      <option value="schemer">Schemer / Strategist</option>
+                    </select>
+                  </label>
+
+                  {/* World type */}
+                  <label className="block text-sm">
+                    <span className="block mb-1 text-gray-300">World Type</span>
+                    <select
+                      name="world_type"
+                      defaultValue="xianxia_high"
+                      className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
+                    >
+                      <option value="wuxia_low">Wuxia (Low Fantasy)</option>
+                      <option value="xianxia_high">Xianxia (High Cultivation)</option>
+                      <option value="xuanhuan">Xuanhuan (Eastern-Western Blend)</option>
+                      <option value="modern_urban">Modern / Urban Cultivation</option>
+                      <option value="sci_fantasy">Sci-Fantasy Cultivation</option>
+                    </select>
+                  </label>
+
+                  {/* MC personality */}
+                  <label className="block text-sm">
+                    <span className="block mb-1 text-gray-300">MC Personality</span>
+                    <select
+                      name="mc_personality"
+                      defaultValue="steadfast"
+                      className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
+                    >
+                      <option value="ruthless">Ruthless</option>
+                      <option value="steadfast">Steadfast / Noble</option>
+                      <option value="playful">Playful / Troll</option>
+                      <option value="cunning">Cunning / Planner</option>
+                      <option value="compassionate">Compassionate</option>
+                    </select>
+                  </label>
+
+                  {/* OP level */}
+                  <label className="block text-sm">
+                    <span className="block mb-1 text-gray-300">OP Level</span>
+                    <select
+                      name="op_level"
+                      defaultValue="balanced"
+                      className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
+                    >
+                      <option value="struggle">Struggle (Underpowered)</option>
+                      <option value="balanced">Balanced Growth</option>
+                      <option value="overpowered">Overpowered (OP)</option>
+                    </select>
+                  </label>
+
+                  {/* Romance level */}
+                  <label className="block text-sm">
+                    <span className="block mb-1 text-gray-300">Romance Level</span>
+                    <select
+                      name="romance_level"
+                      defaultValue="subplot"
+                      className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
+                    >
+                      <option value="none">None</option>
+                      <option value="slow_burn">Slow Burn</option>
+                      <option value="subplot">Subplot</option>
+                      <option value="harem_light">Harem-Light</option>
+                    </select>
+                  </label>
+
+                  {/* Violence level */}
+                  <label className="block text-sm">
+                    <span className="block mb-1 text-gray-300">Violence Level</span>
+                    <select
+                      name="violence_level"
+                      defaultValue="balanced"
+                      className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
+                    >
+                      <option value="low">Low</option>
+                      <option value="balanced">Balanced</option>
+                      <option value="savage">Savage</option>
+                    </select>
+                  </label>
+
+                  {/* Power progression */}
+                  <label className="block text-sm">
+                    <span className="block mb-1 text-gray-300">Power Progression</span>
+                    <select
+                      name="power_progression"
+                      defaultValue="steady"
+                      className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-3 py-2 text-gray-100"
+                    >
+                      <option value="slow">Slow</option>
+                      <option value="steady">Steady</option>
+                      <option value="fast">Fast</option>
+                    </select>
+                  </label>
+
+                  {/* Genres / Themes */}
+                  <fieldset className="border border-gray-700 rounded p-3">
+                    <legend className="text-sm text-gray-300 px-1">
+                      Genres / Themes (choose a few)
+                    </legend>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" name="genres" value="revenge" />
+                        <span>Revenge</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" name="genres" value="sect_politics" />
+                        <span>Sect politics</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" name="genres" value="system" />
+                        <span>System / Status Screen</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" name="genres" value="face_slapping" />
+                        <span>Face-slapping</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" name="genres" value="slow_cultivation" />
+                        <span>Slow cultivation</span>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" name="genres" value="comedy" />
+                        <span>Comedy</span>
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  {/* Optional flags */}
+                  <fieldset className="border border-gray-700 rounded p-3">
+                    <legend className="text-sm text-gray-300 px-1">
+                      Optional Tropes
+                    </legend>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="flag_system_cheats" value="1" />
+                      <span>System / Cheats</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="flag_transmigration" value="1" />
+                      <span>Transmigration / Reincarnation</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="flag_comedy" value="1" />
+                      <span>Comedy Emphasis</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="flag_grimdark" value="1" />
+                      <span>Grimdark Undertones</span>
+                    </label>
+                  </fieldset>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Tags (both modes) */}
@@ -398,7 +440,9 @@ export default function NewStoryPage() {
           {/* Manual-only: chapter 1 starter */}
           {mode === "manual" && (
             <fieldset className="border border-gray-700 rounded p-3 space-y-3">
-              <legend className="text-sm text-gray-300 px-1">Chapter 1 (optional)</legend>
+              <legend className="text-sm text-gray-300 px-1">
+                Chapter 1 (optional)
+              </legend>
 
               <label className="block text-sm">
                 <span className="block mb-1 text-gray-300">Chapter 1 title</span>
@@ -420,7 +464,7 @@ export default function NewStoryPage() {
               </label>
 
               <p className="text-xs text-gray-400">
-                Don’t worry—AI tools will be available inside the editor later if you want them.
+                Optional assist tools live inside the editor later if you want them.
               </p>
             </fieldset>
           )}
@@ -430,8 +474,19 @@ export default function NewStoryPage() {
             disabled={isSubmitting}
             className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:bg-indigo-900 disabled:text-gray-400"
           >
-            {isSubmitting ? "Channeling Qi…" : mode === "manual" ? "Create Story & Start Writing" : "Create Story"}
+            {isSubmitting
+              ? "Channeling Qi…"
+              : mode === "manual"
+              ? "Create Story & Start Writing"
+              : "Create Story"}
           </button>
+
+          {mode === "ai" && (
+            <p className="text-xs text-gray-500">
+              Note: “Optional assist” is for kickstarting structure. Your voice and
+              edits are what matters.
+            </p>
+          )}
         </form>
       </main>
 
@@ -445,7 +500,7 @@ export default function NewStoryPage() {
               Weaving your destiny…
             </h2>
             <p className="mt-1 text-sm text-gray-300">
-              Summoning the heavens to forge your new cultivation saga.
+              Forging your new cultivation saga.
             </p>
           </div>
         </div>
