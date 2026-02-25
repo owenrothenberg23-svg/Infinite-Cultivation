@@ -38,6 +38,49 @@ function isAssetUrl(url: string) {
   return /^https?:\/\//i.test(url.trim());
 }
 
+function buildLibraryHref(
+  sp: SearchParamsResolved,
+  patch: Record<string, string | null>
+) {
+  const params = new URLSearchParams();
+
+  const qRaw = sp["q"];
+  const genreRaw = sp["genre"];
+  const sortRaw = sp["sort"];
+
+  const q =
+    typeof qRaw === "string"
+      ? qRaw
+      : Array.isArray(qRaw)
+      ? qRaw[0] ?? ""
+      : "";
+
+  const genre =
+    typeof genreRaw === "string"
+      ? genreRaw
+      : Array.isArray(genreRaw)
+      ? genreRaw[0] ?? ""
+      : "";
+
+  const sort =
+    typeof sortRaw === "string"
+      ? sortRaw
+      : Array.isArray(sortRaw)
+      ? sortRaw[0] ?? ""
+      : "";
+
+  const nextQ = patch.q ?? q;
+  const nextGenre = patch.genre ?? genre;
+  const nextSort = patch.sort ?? sort;
+
+  if (nextQ && nextQ.trim()) params.set("q", nextQ.trim());
+  if (nextGenre && nextGenre.trim()) params.set("genre", nextGenre.trim());
+  if (nextSort && nextSort.trim()) params.set("sort", nextSort.trim());
+
+  const qs = params.toString();
+  return qs ? `/library?${qs}` : `/library`;
+}
+
 export default async function LibraryPage({
   searchParams,
 }: {
@@ -57,6 +100,7 @@ export default async function LibraryPage({
 
   const qRaw = sp["q"];
   const genreRaw = sp["genre"];
+  const sortRaw = sp["sort"];
 
   const q =
     typeof qRaw === "string"
@@ -72,6 +116,13 @@ export default async function LibraryPage({
       ? genreRaw[0] ?? ""
       : "";
 
+  const sort =
+    typeof sortRaw === "string"
+      ? sortRaw
+      : Array.isArray(sortRaw)
+      ? sortRaw[0] ?? "newest"
+      : "newest";
+
   // ✅ Public stories list (kept as admin read for stability)
   const sbAdmin = supabaseAdmin();
 
@@ -81,7 +132,6 @@ export default async function LibraryPage({
       "id, title, public_summary, cover_image_url, created_at, view_count, avg_rating, author_username, primary_genre, tags"
     )
     .eq("is_public", true)
-    .order("created_at", { ascending: false })
     .limit(30);
 
   if (q) {
@@ -92,9 +142,22 @@ export default async function LibraryPage({
     query = query.eq("primary_genre", genre);
   }
 
+  // ✅ Sorting
+  if (sort === "trending") {
+    query = query.order("view_count", { ascending: false }).order("created_at", {
+      ascending: false,
+    });
+  } else if (sort === "top") {
+    query = query.order("avg_rating", { ascending: false }).order("created_at", {
+      ascending: false,
+    });
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
   const { data, error } = await query;
   const stories = (data as PublicStory[] | null) ?? [];
-  const activeFilters = q || genre;
+  const activeFilters = q || genre || (sort && sort !== "newest");
 
   // ✅ Determine logged-in user (cookie auth) and load their bookmarks
   const ssr = await supabaseServerClient();
@@ -130,16 +193,38 @@ export default async function LibraryPage({
             </p>
           </div>
 
+          {/* ✅ REAL tabs (preserve q/genre) */}
           <div className="inline-flex rounded-full bg-gray-800 p-1 text-sm">
-            <button className="rounded-full bg-indigo-600 px-3 py-1 font-medium">
+            <Link
+              href={buildLibraryHref(sp, { sort: "newest" })}
+              className={`rounded-full px-3 py-1 font-medium ${
+                sort === "newest"
+                  ? "bg-indigo-600 text-white"
+                  : "text-gray-300 hover:text-white"
+              }`}
+            >
               Newest
-            </button>
-            <button className="rounded-full px-3 py-1 text-gray-300 hover:text-white">
+            </Link>
+            <Link
+              href={buildLibraryHref(sp, { sort: "trending" })}
+              className={`rounded-full px-3 py-1 ${
+                sort === "trending"
+                  ? "bg-indigo-600 text-white"
+                  : "text-gray-300 hover:text-white"
+              }`}
+            >
               Trending
-            </button>
-            <button className="rounded-full px-3 py-1 text-gray-300 hover:text-white">
+            </Link>
+            <Link
+              href={buildLibraryHref(sp, { sort: "top" })}
+              className={`rounded-full px-3 py-1 ${
+                sort === "top"
+                  ? "bg-indigo-600 text-white"
+                  : "text-gray-300 hover:text-white"
+              }`}
+            >
               Top Rated
-            </button>
+            </Link>
           </div>
         </div>
 
@@ -177,6 +262,9 @@ export default async function LibraryPage({
             </select>
           </div>
 
+          {/* ✅ preserve sort on submit */}
+          <input type="hidden" name="sort" value={sort} />
+
           <div className="self-end">
             <button
               type="submit"
@@ -202,6 +290,19 @@ export default async function LibraryPage({
                 in{" "}
                 <span className="text-gray-200">
                   {GENRES.find((g) => g.value === genre)?.label ?? genre}
+                </span>
+              </>
+            )}
+            {sort !== "newest" && (
+              <>
+                {" "}
+                sorted by{" "}
+                <span className="text-gray-200">
+                  {sort === "trending"
+                    ? "Trending"
+                    : sort === "top"
+                    ? "Top Rated"
+                    : "Newest"}
                 </span>
               </>
             )}
@@ -239,7 +340,6 @@ export default async function LibraryPage({
                 key={story.id}
                 className="relative transition rounded-lg border border-white/5 bg-white/5 p-4 hover:border-indigo-500 hover:bg-white/10"
               >
-                {/* ✅ Save button (does not navigate) */}
                 <div className="absolute right-4 top-4 z-10">
                   <StoryBookmarkButton
                     storyId={story.id}

@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSupabaseServer } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseServer";
 import GenerateButton from "@/components/GenerateButton";
 import PublishStoryPanel from "@/components/PublishStoryPanel";
 
@@ -17,11 +18,9 @@ export default async function StoryPage({
 
   const sb = getSupabaseServer();
 
-  // who is viewing?
   const { data: userData } = await sb.auth.getUser();
   const viewerId = userData?.user?.id ?? null;
 
-  // Load story INCLUDING user_id so we can determine ownership
   const { data: story } = await sb
     .from("stories")
     .select(
@@ -33,7 +32,8 @@ export default async function StoryPage({
         is_public,
         public_summary,
         cover_image_url,
-        author_username
+        author_username,
+        view_count
       `
     )
     .eq("id", storyId)
@@ -43,10 +43,17 @@ export default async function StoryPage({
 
   const isOwner = !!viewerId && story.user_id === viewerId;
 
-  // If not owner AND not public → hide it
   if (!isOwner && !story.is_public) return notFound();
 
-  // Chapters (RLS will also protect this)
+  // ✅ Increment view count (only public + not owner)
+  if (story.is_public && !isOwner) {
+    const admin = supabaseAdmin();
+    await admin
+      .from("stories")
+      .update({ view_count: (story.view_count ?? 0) + 1 })
+      .eq("id", storyId);
+  }
+
   const { data: chapters } = await sb
     .from("chapters")
     .select("id, chapter_number, title, created_at")
@@ -56,29 +63,27 @@ export default async function StoryPage({
   const lastNum = story.last_chapter_number ?? 0;
   const nextNumber = lastNum + 1;
   const hasChapters = !!chapters?.length;
-
   const cover = (story.cover_image_url || "").trim();
 
   return (
     <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-8">
       <header className="space-y-3">
-        {cover ? (
+        {cover && (
           <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={cover} alt="" className="h-48 w-full object-cover" loading="lazy" />
+            <img src={cover} alt="" className="h-48 w-full object-cover" />
           </div>
-        ) : null}
+        )}
 
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-3xl font-bold">{story.title}</h1>
-
             <p className="text-xs uppercase tracking-[0.25em] text-gray-500">
               {isOwner ? "Creator Dashboard" : "Reader View"}
             </p>
-
             {story.author_username && (
-              <p className="text-sm text-gray-400">by {story.author_username}</p>
+              <p className="text-sm text-gray-400">
+                by {story.author_username}
+              </p>
             )}
           </div>
 
@@ -93,11 +98,11 @@ export default async function StoryPage({
         </div>
 
         {story.is_public ? (
-          <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
+          <span className="inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-300">
             Published in Library
           </span>
         ) : (
-          <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-gray-300 border border-white/10">
+          <span className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs text-gray-300 border border-white/10">
             Draft (private)
           </span>
         )}
@@ -106,14 +111,19 @@ export default async function StoryPage({
           <span>
             Chapters: <span className="text-gray-200">{lastNum}</span>
           </span>
-          {isOwner && (
+          {!isOwner && (
             <span>
-              Next: <span className="text-gray-200">Chapter {nextNumber}</span>
+              Views:{" "}
+              <span className="text-gray-200">
+                {(story.view_count ?? 0) + 1}
+              </span>
             </span>
           )}
         </div>
 
-        {story.public_summary && <p className="text-sm text-gray-300">{story.public_summary}</p>}
+        {story.public_summary && (
+          <p className="text-sm text-gray-300">{story.public_summary}</p>
+        )}
       </header>
 
       <section>
@@ -125,10 +135,15 @@ export default async function StoryPage({
               <li key={ch.id}>
                 <Link
                   href={`/read/${storyId}/chapter/${ch.chapter_number}`}
-                  className="block rounded-md border border-white/5 bg-white/5 px-3 py-2 text-gray-300 hover:text-white hover:bg-white/10 hover:border-indigo-500 transition"
+                  className="block rounded-md border border-white/5 bg-white/5 px-3 py-2 hover:border-indigo-500 hover:bg-white/10"
                 >
-                  <span className="font-medium">Chapter {ch.chapter_number}</span>
-                  <span className="text-gray-400"> — {ch.title || "Untitled"}</span>
+                  <span className="font-medium">
+                    Chapter {ch.chapter_number}
+                  </span>
+                  <span className="text-gray-400">
+                    {" "}
+                    — {ch.title || "Untitled"}
+                  </span>
                 </Link>
               </li>
             ))
@@ -137,7 +152,6 @@ export default async function StoryPage({
           )}
         </ul>
 
-        {/* ✅ ONLY owners can generate */}
         {isOwner && (
           <div className="mt-6">
             <GenerateButton storyId={storyId} nextNumber={nextNumber} />
@@ -145,7 +159,6 @@ export default async function StoryPage({
         )}
       </section>
 
-      {/* ✅ ONLY owners can publish/edit metadata */}
       {isOwner && (
         <PublishStoryPanel
           storyId={storyId}
