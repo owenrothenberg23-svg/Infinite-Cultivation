@@ -29,11 +29,17 @@ type BookmarkAggRow = {
   bookmark_count: number;
 };
 
+type Params = { storyId: string };
+
 export default async function AnalyticsStoryPage({
   params,
 }: {
-  params: { storyId: string };
+  params: Promise<Params> | Params;
 }) {
+  // ✅ Next 15/16-safe params resolution (same pattern as your other pages)
+  const p = (await (params as any)) as Params;
+  const storyId = p?.storyId;
+
   const sb = await supabaseServerClient();
   const { data: userData } = await sb.auth.getUser();
   const user = userData?.user;
@@ -53,8 +59,25 @@ export default async function AnalyticsStoryPage({
     );
   }
 
+  if (!storyId) {
+    return (
+      <main className="mx-auto max-w-4xl px-4 py-10 text-gray-100">
+        <h1 className="text-3xl font-bold">Story Analytics</h1>
+        <p className="mt-2 text-sm text-red-400">
+          Missing story id in route params.
+        </p>
+        <Link
+          href="/dashboard/analytics"
+          className="mt-6 inline-flex rounded-md bg-gray-800 px-4 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
+        >
+          ← Back
+        </Link>
+      </main>
+    );
+  }
+
   const { data, error } = await sb.rpc("author_story_analytics", {
-    p_story_id: params.storyId,
+    p_story_id: storyId,
   });
 
   const row = (Array.isArray(data) ? data[0] : data) as Row | null;
@@ -66,6 +89,11 @@ export default async function AnalyticsStoryPage({
         <p className="mt-2 text-sm text-red-400">
           Couldn’t load analytics for this story.
         </p>
+        {error?.message ? (
+          <p className="mt-2 text-xs text-gray-400">
+            Error: <span className="text-gray-300">{error.message}</span>
+          </p>
+        ) : null}
         <Link
           href="/dashboard/analytics"
           className="mt-6 inline-flex rounded-md bg-gray-800 px-4 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
@@ -78,10 +106,11 @@ export default async function AnalyticsStoryPage({
 
   // Pull bookmark count (single-story) via get_story_analytics
   let bookmarkCount = 0;
-  const { data: aggData } = await sb.rpc("get_story_analytics", {
+  const { data: aggData, error: aggErr } = await sb.rpc("get_story_analytics", {
     p_story_ids: [row.story_id],
   });
-  if (Array.isArray(aggData) && aggData[0]) {
+
+  if (!aggErr && Array.isArray(aggData) && aggData[0]) {
     const a = aggData[0] as BookmarkAggRow;
     bookmarkCount = Number(a.bookmark_count ?? 0);
   }
@@ -137,9 +166,7 @@ export default async function AnalyticsStoryPage({
 function Stat({ label, value }: { label: string; value: any }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/5 p-4">
-      <p className="text-xs uppercase tracking-[0.2em] text-gray-400">
-        {label}
-      </p>
+      <p className="text-xs uppercase tracking-[0.2em] text-gray-400">{label}</p>
       <p className="mt-1 text-2xl font-semibold text-white">{value}</p>
     </div>
   );
