@@ -162,6 +162,25 @@ export default async function StoryPage({
         {s.public_summary && (
           <p className="text-sm text-gray-300">{s.public_summary}</p>
         )}
+
+        {/* ✅ NEW: Quick creator actions */}
+        {isOwner && (
+          <div className="flex flex-wrap gap-2 pt-2">
+            <Link
+              href={`/read/${storyId}/import`}
+              className="inline-flex items-center rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-gray-100 hover:border-indigo-500 hover:bg-white/5"
+            >
+              Bulk import chapters
+            </Link>
+
+            <Link
+              href={`/dashboard/analytics/${storyId}`}
+              className="inline-flex items-center rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-gray-100 hover:border-indigo-500 hover:bg-white/5"
+            >
+              View analytics
+            </Link>
+          </div>
+        )}
       </header>
 
       <section>
