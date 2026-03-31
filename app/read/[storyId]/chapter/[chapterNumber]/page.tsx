@@ -1,47 +1,63 @@
 // app/read/[storyId]/chapter/[chapterNumber]/page.tsx
 import Link from "next/link";
-import { getSupabaseServer } from "@/lib/supabase"; // ✅ changed
+import { notFound } from "next/navigation";
+import { getSupabaseServer } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseServer"; // ✅ needed for view increments (your current pattern)
 import GenerateButton from "@/components/GenerateButton";
 import ChapterEditor from "@/components/ChapterEditor";
 
 type Params = { storyId: string; chapterNumber: string };
 
+function safeParseInt(v: unknown): number | null {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.trunc(n);
+  return i > 0 ? i : null;
+}
+
 export default async function ChapterPage({
   params,
 }: {
-  params: Promise<Params>;
+  params: Promise<Params> | Params;
 }) {
-  // Next 16 promise-params
-  const { storyId, chapterNumber } = await params;
-  const chapterNum = Number(chapterNumber);
+  // ✅ Next 15/16 safe params resolve
+  const p =
+    typeof (params as any)?.then === "function"
+      ? (((await params) as any) ?? ({} as Params))
+      : ((params as any) ?? ({} as Params));
 
-  // ✅ create server client via helper (prevents the thrown error)
-  const supabase = getSupabaseServer();
+  const storyId = p?.storyId;
+  const chapterNum = safeParseInt(p?.chapterNumber);
 
-  // Guard: invalid chapter number
-  if (!Number.isFinite(chapterNum) || chapterNum <= 0) {
+  if (!storyId || !chapterNum) {
     return (
       <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-4">
         <h1 className="text-2xl font-bold">Invalid chapter</h1>
         <p className="text-gray-400">That chapter number doesn’t look right.</p>
         <Link
-          href={`/read/${storyId}`}
+          href={storyId ? `/read/${storyId}` : "/library"}
           className="text-indigo-400 hover:underline"
         >
-          ← Back to story
+          ← Back
         </Link>
       </main>
     );
   }
 
-  // Load story (for title & bounds + author)
-  const { data: story } = await supabase
-    .from("stories")
-    .select("id, title, last_chapter_number, user_id")
-    .eq("id", storyId)
-    .single();
+  const supabase = getSupabaseServer();
 
-  if (!story) {
+  // ✅ auth (needed to allow authors to read private stories/chapters)
+  const { data: userData } = await supabase.auth.getUser();
+  const viewerId = userData?.user?.id ?? null;
+
+  // ✅ Load story (include is_public + author_id support)
+  const { data: story, error: storyErr } = await supabase
+    .from("stories")
+    .select("id, title, last_chapter_number, user_id, author_id, is_public, view_count")
+    .eq("id", storyId)
+    .maybeSingle();
+
+  if (storyErr || !story) {
     return (
       <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-4">
         <h1 className="text-2xl font-bold">Story not found</h1>
@@ -52,43 +68,26 @@ export default async function ChapterPage({
     );
   }
 
-  // Load the chapter by composite key
-  const { data: chapter } = await supabase
+  const isOwner =
+    !!viewerId && (story.user_id === viewerId || story.author_id === viewerId);
+
+  // ✅ protect private stories from non-owners
+  if (!isOwner && !story.is_public) return notFound();
+
+  // ✅ Load the chapter and IGNORE deleted chapters
+  const { data: chapter, error: chapErr } = await supabase
     .from("chapters")
     .select(
-      "id, chapter_number, title, final_content, draft_content, content, created_at"
+      "id, chapter_number, title, final_content, draft_content, content, created_at, is_deleted, deleted_at"
     )
     .eq("story_id", storyId)
     .eq("chapter_number", chapterNum)
+    .eq("is_deleted", false) // ✅ critical
     .maybeSingle();
 
-  // Choose best available text (supports your draft-first + finalize flow)
-  const chapterText =
-    (chapter as any)?.final_content ??
-    (chapter as any)?.draft_content ??
-    (chapter as any)?.content ??
-    "";
-
-  // Fetch recent memories up to this chapter
-  const { data: mems } = await supabase
-    .from("memories")
-    .select("kind, content, chapter_number")
-    .eq("story_id", storyId)
-    .lte("chapter_number", chapterNum)
-    .order("chapter_number", { ascending: false })
-    .limit(20);
-
-  const prev = chapterNum > 1 ? chapterNum - 1 : null;
-  const next =
-    story?.last_chapter_number && chapterNum < story.last_chapter_number
-      ? chapterNum + 1
-      : null;
-
-  const isLastChapter = chapterNum === (story.last_chapter_number ?? 0);
-
-  // Friendly missing-chapter state
-  if (!chapter) {
-    const last = story.last_chapter_number ?? 0;
+  // If missing/deleted => show the friendly "hasn't manifested" state
+  if (chapErr || !chapter) {
+    const last = Number(story.last_chapter_number ?? 0);
 
     return (
       <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-4">
@@ -102,7 +101,7 @@ export default async function ChapterPage({
             This chapter hasn’t manifested yet.
           </p>
           <p className="text-sm text-gray-400 mt-1">
-            It may not exist, or it hasn’t been generated/published.
+            It may not exist, it may be deleted, or it hasn’t been generated/published.
           </p>
 
           <div className="mt-4 flex flex-wrap gap-3">
@@ -127,6 +126,56 @@ export default async function ChapterPage({
     );
   }
 
+  // ✅ Choose best available text (draft-first + finalize flow)
+  const chapterText =
+    (chapter as any)?.final_content ??
+    (chapter as any)?.draft_content ??
+    (chapter as any)?.content ??
+    "";
+
+  // ✅ Fetch recent memories up to this chapter
+  const { data: mems } = await supabase
+    .from("memories")
+    .select("kind, content, chapter_number")
+    .eq("story_id", storyId)
+    .lte("chapter_number", chapterNum)
+    .order("chapter_number", { ascending: false })
+    .limit(20);
+
+  // ✅ Prev/Next should skip deleted chapters
+  const { data: prevRow } = await supabase
+    .from("chapters")
+    .select("chapter_number")
+    .eq("story_id", storyId)
+    .eq("is_deleted", false)
+    .lt("chapter_number", chapterNum)
+    .order("chapter_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: nextRow } = await supabase
+    .from("chapters")
+    .select("chapter_number")
+    .eq("story_id", storyId)
+    .eq("is_deleted", false)
+    .gt("chapter_number", chapterNum)
+    .order("chapter_number", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const prev = prevRow?.chapter_number ? Number(prevRow.chapter_number) : null;
+  const next = nextRow?.chapter_number ? Number(nextRow.chapter_number) : null;
+
+  // ✅ "is last chapter" should be computed based on next existing chapter, not story cache
+  const isLastChapter = !next;
+
+  // ✅ Increment view count (only public + not owner)
+  if (story.is_public && !isOwner) {
+    const admin = supabaseAdmin();
+    const current = Number(story.view_count ?? 0);
+    await admin.from("stories").update({ view_count: current + 1 }).eq("id", storyId);
+  }
+
   return (
     <main className="max-w-3xl mx-auto p-8 text-gray-200">
       <div className="mb-4 flex items-center justify-between gap-4">
@@ -143,13 +192,11 @@ export default async function ChapterPage({
 
       <article className="prose prose-invert">
         <h2 className="text-2xl font-semibold mb-2">
-          {chapter.title || `Chapter ${chapterNum}`}
+          {(chapter as any)?.title || `Chapter ${chapterNum}`}
         </h2>
 
         {chapterText.trim().length > 0 ? (
-          <div className="whitespace-pre-wrap leading-relaxed">
-            {chapterText}
-          </div>
+          <div className="whitespace-pre-wrap leading-relaxed">{chapterText}</div>
         ) : (
           <p className="text-gray-400">This chapter has no content yet.</p>
         )}
@@ -178,7 +225,7 @@ export default async function ChapterPage({
       <ChapterEditor
         storyId={storyId}
         chapterNumber={chapterNum}
-        authorId={story.user_id ?? null}
+        authorId={(story.user_id ?? story.author_id) ?? null} // ✅ supports both schemas
         initialContent={chapterText ?? ""}
         initialTitle={(chapter as any)?.title ?? ""}
       />
@@ -217,7 +264,7 @@ export default async function ChapterPage({
           <h3 className="text-lg font-semibold mb-3">Continue the saga</h3>
           <GenerateButton
             storyId={storyId}
-            nextNumber={(story.last_chapter_number ?? 0) + 1}
+            nextNumber={(Number(story.last_chapter_number ?? chapterNum) || chapterNum) + 1}
           />
         </section>
       )}

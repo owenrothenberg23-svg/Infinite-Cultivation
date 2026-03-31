@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { callEditAssist } from "@/lib/editAssistClient";
 
 type Props = {
   storyId: string;
@@ -13,6 +14,21 @@ type Props = {
 };
 
 type AiMode = "fix" | "rewrite" | "continue" | "suggest";
+
+function mapMode(mode: AiMode): "grammar" | "rewrite" | "continue" | "suggest" {
+  switch (mode) {
+    case "fix":
+      return "grammar";
+    case "rewrite":
+      return "rewrite";
+    case "continue":
+      return "continue";
+    case "suggest":
+      return "suggest";
+    default:
+      return "grammar";
+  }
+}
 
 export default function ChapterEditor({
   storyId,
@@ -92,6 +108,7 @@ export default function ChapterEditor({
         const res = await fetch("/api/save-draft", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({
             storyId,
             chapterNumber,
@@ -129,6 +146,7 @@ export default function ChapterEditor({
       const res = await fetch("/api/save-draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           storyId,
           chapterNumber,
@@ -167,6 +185,7 @@ export default function ChapterEditor({
       const res = await fetch("/api/finalize-chapter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ storyId, chapterNumber }),
       });
 
@@ -206,25 +225,16 @@ export default function ChapterEditor({
 
     setAiBusy(true);
     try {
-      const res = await fetch("/api/ai/edit-assist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          storyId,
-          chapterNumber,
-          mode: aiMode,
-          instruction: aiInstruction || "",
-          text: txt,
-        }),
+      // ✅ Use centralized client wrapper (ensures POST + credentials + consistent shape)
+      const result = await callEditAssist({
+        text: txt,
+        mode: mapMode(aiMode),
+        instruction: aiInstruction || undefined,
       });
 
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-
-      setAiOut(String(data?.output || "").trim());
-      if (!String(data?.output || "").trim()) {
-        setAiErr("AI returned empty output.");
-      }
+      const out = String(result || "").trim();
+      setAiOut(out);
+      if (!out) setAiErr("AI returned empty output.");
     } catch (e: any) {
       setAiErr(e?.message || "AI request failed.");
     } finally {
@@ -242,7 +252,7 @@ export default function ChapterEditor({
 
   function applyAiAppend() {
     if (!aiOut.trim()) return;
-    setContent((prev) => (prev.trimEnd() + "\n\n" + aiOut.trim()));
+    setContent((prev) => prev.trimEnd() + "\n\n" + aiOut.trim());
     setAiOut("");
     setAiErr(null);
     setStatus("AI continuation appended (not saved yet).");
@@ -410,7 +420,6 @@ export default function ChapterEditor({
                         <button
                           type="button"
                           onClick={() => {
-                            // suggestions shouldn’t auto-replace the chapter
                             setStatus("Review suggestions above. No changes applied.");
                           }}
                           className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/10"
