@@ -2,6 +2,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { supabaseServerClient } from "@/lib/supabaseServerSSR";
+import NovelBookmarkButton from "@/components/NovelBookmarkButton";
+import NovelRatingForm from "@/components/NovelRatingForm";
 
 export const dynamic = "force-dynamic";
 
@@ -47,9 +50,9 @@ export default async function NovelPage({
   const p = (await params) as { slug: string };
   const slug = p.slug;
 
-  const sb = supabaseAdmin();
+  const admin = supabaseAdmin();
 
-  const { data } = await sb
+  const { data } = await admin
     .from("novels")
     .select("*")
     .eq("slug", slug)
@@ -59,15 +62,66 @@ export default async function NovelPage({
 
   if (!novel) return notFound();
 
+  // Best-effort view increment
+  await admin
+    .from("novels")
+    .update({ view_count: (novel.view_count ?? 0) + 1 })
+    .eq("id", novel.id);
+
+  const ssr = await supabaseServerClient();
+  const { data: userData } = await ssr.auth.getUser();
+  const user = userData?.user ?? null;
+
+  let initialSaved = false;
+  let initialRating: number | null = null;
+
+  if (user) {
+    const { data: bm } = await ssr
+      .from("novel_bookmarks")
+      .select("novel_id")
+      .eq("user_id", user.id)
+      .eq("novel_id", novel.id)
+      .maybeSingle();
+
+    initialSaved = !!bm;
+
+    const { data: ratingRow } = await ssr
+      .from("novel_ratings")
+      .select("rating")
+      .eq("user_id", user.id)
+      .eq("novel_id", novel.id)
+      .maybeSingle();
+
+    initialRating =
+      typeof ratingRow?.rating === "number" ? ratingRow.rating : null;
+  }
+
   const cover = (novel.cover_image_url || "").trim();
   const hasCover = !!cover && isAssetUrl(cover);
 
+  const displayedViews = (novel.view_count ?? 0) + 1;
+
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 text-gray-100">
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <Link href="/library" className="text-sm text-indigo-300 hover:underline">
           ← Back to database
         </Link>
+
+        <div className="flex flex-wrap gap-2">
+          <NovelBookmarkButton
+            novelId={novel.id}
+            initialSaved={initialSaved}
+            isAuthed={!!user}
+          />
+
+          <Link
+            href="/rankings"
+            className="inline-flex rounded-md border border-white/10 bg-black/40 px-3 py-2 text-xs font-medium text-gray-200 hover:border-indigo-500 hover:text-white"
+          >
+            Rankings
+          </Link>
+        </div>
       </div>
 
       <section className="grid gap-6 md:grid-cols-[180px_1fr]">
@@ -134,7 +188,7 @@ export default async function NovelPage({
 
             <div className="rounded-lg border border-white/10 bg-white/5 p-3">
               <p className="text-xs text-gray-400">Views</p>
-              <p className="mt-1 text-lg font-semibold">{novel.view_count ?? 0}</p>
+              <p className="mt-1 text-lg font-semibold">{displayedViews}</p>
             </div>
 
             <div className="rounded-lg border border-white/10 bg-white/5 p-3">
@@ -145,28 +199,38 @@ export default async function NovelPage({
             </div>
           </div>
 
-          {novel.source_url ? (
-            <a
-              href={novel.source_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
-            >
-              Read at source
-            </a>
-          ) : (
-            <span className="inline-flex rounded-md border border-white/10 px-4 py-2 text-sm text-gray-400">
-              Source link not added yet
-            </span>
-          )}
+          <div className="flex flex-wrap gap-3">
+            {novel.source_url ? (
+              <a
+                href={novel.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              >
+                Read at source
+              </a>
+            ) : (
+              <span className="inline-flex rounded-md border border-white/10 px-4 py-2 text-sm text-gray-400">
+                Source link not added yet
+              </span>
+            )}
+          </div>
         </div>
       </section>
 
-      <section className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-5">
-        <h2 className="text-xl font-semibold text-white">Synopsis</h2>
-        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
-          {novel.synopsis || "No synopsis added yet."}
-        </p>
+      <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_300px]">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <h2 className="text-xl font-semibold text-white">Synopsis</h2>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+            {novel.synopsis || "No synopsis added yet."}
+          </p>
+        </div>
+
+        <NovelRatingForm
+          novelId={novel.id}
+          initialRating={initialRating}
+          isAuthed={!!user}
+        />
       </section>
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
