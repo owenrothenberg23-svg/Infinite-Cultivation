@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
-import ModeToggle from "@/components/ModeToggle"; // ✅ NEW
-import { useMode } from "@/components/ModeProvider"; // ✅ NEW
+import ModeToggle from "@/components/ModeToggle";
+import { useMode } from "@/components/ModeProvider";
 
 type ProfileRow = {
   display_name: string | null;
@@ -12,7 +12,7 @@ type ProfileRow = {
 };
 
 export default function HeaderNav() {
-  const { mode } = useMode(); // ✅ NEW
+  const { mode } = useMode();
 
   const [loading, setLoading] = useState(true);
   const [isAuthed, setIsAuthed] = useState(false);
@@ -40,7 +40,6 @@ export default function HeaderNav() {
 
         setIsAuthed(true);
 
-        // ----- base name: display_name → username → email -----
         let baseName = user.email ?? "Cultivator";
 
         const { data: profileData } = await sb
@@ -54,7 +53,6 @@ export default function HeaderNav() {
           baseName = p.display_name || p.username || baseName;
         }
 
-        // ----- active title from user_titles + titles -----
         let activeTitleLabel: string | null = null;
 
         const { data: activeUserTitle, error: activeErr } = await sb
@@ -76,12 +74,7 @@ export default function HeaderNav() {
           }
         }
 
-        // Final label: "Username (Title)" or just "Username"
-        const finalLabel = activeTitleLabel
-          ? `${baseName} (${activeTitleLabel})`
-          : baseName;
-
-        setLabel(finalLabel);
+        setLabel(activeTitleLabel ? `${baseName} (${activeTitleLabel})` : baseName);
       } catch (e) {
         console.warn("HeaderNav: failed to load session/profile/title", e);
         setIsAuthed(false);
@@ -94,14 +87,18 @@ export default function HeaderNav() {
 
   return (
     <nav className="flex items-center gap-4 text-sm">
-      {/* ✅ Mode toggle always visible */}
       <ModeToggle />
 
-      {/* ✅ Mode-aware nav ordering / emphasis */}
       {mode === "reader" ? (
         <>
           <Link href="/library" className="text-gray-200 hover:text-white">
             Library
+          </Link>
+          <Link href="/rankings" className="text-gray-200 hover:text-white">
+            Rankings
+          </Link>
+          <Link href="/dashboard?tab=reader" className="text-gray-300 hover:text-white">
+            My Saves
           </Link>
           <Link href="/titles" className="text-gray-300 hover:text-white">
             Titles
@@ -109,23 +106,23 @@ export default function HeaderNav() {
           <Link href="/store" className="text-gray-300 hover:text-white">
             Store
           </Link>
-          <Link href="/dashboard" className="text-gray-300 hover:text-white">
-            Dashboard
-          </Link>
           <Link href="/new" className="text-gray-300 hover:text-white">
-            New Story
+            Add / Create
           </Link>
         </>
       ) : (
         <>
-          <Link href="/dashboard" className="text-gray-200 hover:text-white">
+          <Link href="/dashboard?tab=creator" className="text-gray-200 hover:text-white">
             Dashboard
           </Link>
           <Link href="/new" className="text-gray-300 hover:text-white">
-            New Story
+            Add / Create
           </Link>
           <Link href="/library" className="text-gray-300 hover:text-white">
             Library
+          </Link>
+          <Link href="/rankings" className="text-gray-300 hover:text-white">
+            Rankings
           </Link>
           <Link href="/titles" className="text-gray-300 hover:text-white">
             Titles
@@ -143,10 +140,7 @@ export default function HeaderNav() {
       {loading ? (
         <span className="text-xs text-gray-500">...</span>
       ) : isAuthed ? (
-        <span
-          className="max-w-[220px] truncate text-xs text-gray-300"
-          title={label}
-        >
+        <span className="max-w-[220px] truncate text-xs text-gray-300" title={label}>
           {label}
         </span>
       ) : (
