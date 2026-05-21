@@ -1,22 +1,25 @@
 // app/library/page.tsx
 import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabaseServer";
-import { supabaseServerClient } from "@/lib/supabaseServerSSR";
-import StoryBookmarkButton from "@/components/StoryBookmarkButton";
 
 export const dynamic = "force-dynamic";
 
-type PublicStory = {
+type Novel = {
   id: string;
+  slug: string;
   title: string;
-  public_summary: string | null;
+  synopsis: string | null;
   cover_image_url: string | null;
   created_at: string;
   view_count: number | null;
   avg_rating: number | null;
-  author_username: string | null;
+  rating_count: number | null;
+  author_name: string | null;
   primary_genre: string | null;
   tags: string[] | null;
+  status: string | null;
+  translation_status: string | null;
+  chapters_total: number | null;
 };
 
 type SearchParams =
@@ -81,6 +84,11 @@ function buildLibraryHref(
   return qs ? `/library?${qs}` : `/library`;
 }
 
+function pretty(value: string | null | undefined) {
+  if (!value) return "";
+  return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export default async function LibraryPage({
   searchParams,
 }: {
@@ -101,27 +109,21 @@ export default async function LibraryPage({
   const tag = getParam(sp, "tag");
   const sort = getParam(sp, "sort", "newest");
 
-  const sbAdmin = supabaseAdmin();
+  const sb = supabaseAdmin();
 
-  let query = sbAdmin
-    .from("stories")
+  let query = sb
+    .from("novels")
     .select(
-      "id, title, public_summary, cover_image_url, created_at, view_count, avg_rating, author_username, primary_genre, tags"
+      "id, slug, title, synopsis, cover_image_url, created_at, view_count, avg_rating, rating_count, author_name, primary_genre, tags, status, translation_status, chapters_total"
     )
-    .eq("is_public", true)
     .limit(50);
 
   if (q) {
-    query = query.or(`title.ilike.%${q}%,public_summary.ilike.%${q}%`);
+    query = query.or(`title.ilike.%${q}%,synopsis.ilike.%${q}%`);
   }
 
-  if (genre) {
-    query = query.eq("primary_genre", genre);
-  }
-
-  if (tag) {
-    query = query.contains("tags", [tag]);
-  }
+  if (genre) query = query.eq("primary_genre", genre);
+  if (tag) query = query.contains("tags", [tag]);
 
   if (sort === "trending") {
     query = query
@@ -136,29 +138,8 @@ export default async function LibraryPage({
   }
 
   const { data, error } = await query;
-  const stories = (data as PublicStory[] | null) ?? [];
+  const novels = (data as Novel[] | null) ?? [];
   const activeFilters = q || genre || tag || sort !== "newest";
-
-  const ssr = await supabaseServerClient();
-  const { data: userData } = await ssr.auth.getUser();
-  const user = userData?.user ?? null;
-
-  const savedIds = new Set<string>();
-
-  if (user && stories.length > 0) {
-    const { data: bmRows } = await ssr
-      .from("story_bookmarks")
-      .select("story_id")
-      .eq("user_id", user.id)
-      .in(
-        "story_id",
-        stories.map((s) => s.id)
-      );
-
-    for (const r of (bmRows as any[]) ?? []) {
-      if (r?.story_id) savedIds.add(String(r.story_id));
-    }
-  }
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 text-gray-100">
@@ -204,7 +185,7 @@ export default async function LibraryPage({
               type="text"
               name="q"
               defaultValue={q}
-              placeholder="Search title or summary…"
+              placeholder="Search title or synopsis…"
               className="mt-1 w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-100"
             />
           </div>
@@ -267,41 +248,26 @@ export default async function LibraryPage({
 
       {error && (
         <p className="mb-4 text-sm text-red-400">
-          Failed to load public stories.
+          Failed to load novel database.
         </p>
       )}
 
-      {stories.length === 0 ? (
+      {novels.length === 0 ? (
         <p className="mt-8 text-sm text-gray-400">
           No novels match your current filters.
         </p>
       ) : (
         <ul className="mt-4 space-y-4">
-          {stories.map((story) => {
-            const author = story.author_username || "Unknown cultivator";
-            const genreLabel =
-              story.primary_genre &&
-              (GENRES.find((g) => g.value === story.primary_genre)?.label ??
-                story.primary_genre);
-
-            const cover = (story.cover_image_url || "").trim();
+          {novels.map((novel) => {
+            const cover = (novel.cover_image_url || "").trim();
             const hasCover = !!cover && isAssetUrl(cover);
-            const isSaved = savedIds.has(story.id);
 
             return (
               <li
-                key={story.id}
+                key={novel.id}
                 className="relative rounded-lg border border-white/5 bg-white/5 p-4 transition hover:border-indigo-500 hover:bg-white/10"
               >
-                <div className="absolute right-4 top-4 z-10">
-                  <StoryBookmarkButton
-                    storyId={story.id}
-                    initialSaved={isSaved}
-                    isAuthed={!!user}
-                  />
-                </div>
-
-                <Link href={`/read/${story.id}`} className="block pr-20">
+                <Link href={`/novel/${novel.slug}`} className="block">
                   <div className="flex gap-4">
                     <div className="h-28 w-20 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black/30">
                       {hasCover ? (
@@ -319,19 +285,27 @@ export default async function LibraryPage({
 
                     <div className="min-w-0 flex-1 space-y-1">
                       <h2 className="text-lg font-semibold text-white">
-                        {story.title}
+                        {novel.title}
                       </h2>
 
-                      <p className="text-xs text-gray-400">by {author}</p>
+                      <p className="text-xs text-gray-400">
+                        by {novel.author_name || "Unknown author"}
+                      </p>
 
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
-                        {genreLabel && (
+                        {novel.primary_genre && (
                           <span className="rounded-full bg-black/40 px-2 py-0.5 text-indigo-300">
-                            {genreLabel}
+                            {pretty(novel.primary_genre)}
                           </span>
                         )}
 
-                        {story.tags?.slice(0, 4).map((tag) => (
+                        {novel.status && (
+                          <span className="rounded-full bg-black/30 px-2 py-0.5 text-gray-300">
+                            {pretty(novel.status)}
+                          </span>
+                        )}
+
+                        {novel.tags?.slice(0, 4).map((tag) => (
                           <Link
                             key={tag}
                             href={buildLibraryHref(sp, { tag })}
@@ -342,30 +316,27 @@ export default async function LibraryPage({
                         ))}
                       </div>
 
-                      {story.public_summary ? (
+                      {novel.synopsis ? (
                         <p className="line-clamp-2 text-sm text-gray-300">
-                          {story.public_summary}
+                          {novel.synopsis}
                         </p>
                       ) : (
                         <p className="text-sm italic text-gray-500">
-                          No summary yet.
+                          No synopsis yet.
                         </p>
                       )}
 
-                      <div className="mt-2 flex items-center gap-4 text-xs text-gray-400">
+                      <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-400">
+                        <span>{novel.view_count ?? 0} views</span>
                         <span>
-                          {story.view_count ?? 0}{" "}
-                          {story.view_count === 1 ? "view" : "views"}
+                          ★{" "}
+                          {typeof novel.avg_rating === "number" &&
+                          novel.avg_rating > 0
+                            ? novel.avg_rating.toFixed(1)
+                            : "—"}
+                          {novel.rating_count ? ` (${novel.rating_count})` : ""}
                         </span>
-
-                        {typeof story.avg_rating === "number" &&
-                        story.avg_rating > 0 ? (
-                          <span>★ {story.avg_rating.toFixed(1)}</span>
-                        ) : (
-                          <span className="italic text-gray-500">
-                            Not rated yet
-                          </span>
-                        )}
+                        <span>{novel.chapters_total ?? "?"} chapters</span>
                       </div>
                     </div>
                   </div>

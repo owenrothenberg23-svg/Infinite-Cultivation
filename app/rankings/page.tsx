@@ -4,16 +4,20 @@ import { supabaseAdmin } from "@/lib/supabaseServer";
 
 export const dynamic = "force-dynamic";
 
-type Story = {
+type Novel = {
   id: string;
+  slug: string;
   title: string;
-  public_summary: string | null;
+  synopsis: string | null;
   cover_image_url: string | null;
   view_count: number | null;
   avg_rating: number | null;
-  author_username: string | null;
+  rating_count: number | null;
+  author_name: string | null;
   primary_genre: string | null;
   tags: string[] | null;
+  status: string | null;
+  chapters_total: number | null;
 };
 
 type SearchParams =
@@ -33,6 +37,11 @@ function isAssetUrl(url: string) {
   return /^https?:\/\//i.test(url.trim());
 }
 
+function pretty(value: string | null | undefined) {
+  if (!value) return "";
+  return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export default async function RankingsPage({
   searchParams,
 }: {
@@ -48,11 +57,10 @@ export default async function RankingsPage({
   const sb = supabaseAdmin();
 
   let query = sb
-    .from("stories")
+    .from("novels")
     .select(
-      "id, title, public_summary, cover_image_url, view_count, avg_rating, author_username, primary_genre, tags"
+      "id, slug, title, synopsis, cover_image_url, view_count, avg_rating, rating_count, author_name, primary_genre, tags, status, chapters_total"
     )
-    .eq("is_public", true)
     .limit(50);
 
   if (list === "trending") {
@@ -68,7 +76,7 @@ export default async function RankingsPage({
   }
 
   const { data, error } = await query;
-  const stories = (data as Story[] | null) ?? [];
+  const novels = (data as Novel[] | null) ?? [];
 
   const tabs = [
     ["top", "Top Rated"],
@@ -82,7 +90,7 @@ export default async function RankingsPage({
         <div>
           <h1 className="text-3xl font-bold">Rankings</h1>
           <p className="text-sm text-gray-400">
-            The highest-ranked cultivation novels, sagas, and webnovels on Infinite Cultivation.
+            The highest-ranked cultivation novels, sagas, and webnovels.
           </p>
         </div>
 
@@ -107,22 +115,22 @@ export default async function RankingsPage({
         <p className="mb-4 text-sm text-red-400">Failed to load rankings.</p>
       )}
 
-      {stories.length === 0 ? (
+      {novels.length === 0 ? (
         <p className="text-sm text-gray-400">
-          No ranked novels yet. Publish or add public novels to start building rankings.
+          No ranked novels yet. Add novels to start building rankings.
         </p>
       ) : (
         <ol className="space-y-4">
-          {stories.map((story, index) => {
-            const cover = (story.cover_image_url || "").trim();
+          {novels.map((novel, index) => {
+            const cover = (novel.cover_image_url || "").trim();
             const hasCover = !!cover && isAssetUrl(cover);
 
             return (
               <li
-                key={story.id}
+                key={novel.id}
                 className="rounded-lg border border-white/5 bg-white/5 p-4 transition hover:border-indigo-500 hover:bg-white/10"
               >
-                <Link href={`/read/${story.id}`} className="block">
+                <Link href={`/novel/${novel.slug}`} className="block">
                   <div className="flex gap-4">
                     <div className="flex w-10 shrink-0 items-center justify-center text-2xl font-bold text-indigo-300">
                       #{index + 1}
@@ -144,28 +152,33 @@ export default async function RankingsPage({
 
                     <div className="min-w-0 flex-1">
                       <h2 className="text-lg font-semibold text-white">
-                        {story.title}
+                        {novel.title}
                       </h2>
                       <p className="text-xs text-gray-400">
-                        by {story.author_username || "Unknown cultivator"}
+                        by {novel.author_name || "Unknown author"}
                       </p>
 
-                      {story.public_summary ? (
+                      {novel.synopsis ? (
                         <p className="mt-1 line-clamp-2 text-sm text-gray-300">
-                          {story.public_summary}
+                          {novel.synopsis}
                         </p>
                       ) : null}
 
                       <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-400">
-                        <span>{story.view_count ?? 0} views</span>
+                        <span>{novel.view_count ?? 0} views</span>
                         <span>
                           ★{" "}
-                          {typeof story.avg_rating === "number" &&
-                          story.avg_rating > 0
-                            ? story.avg_rating.toFixed(1)
+                          {typeof novel.avg_rating === "number" &&
+                          novel.avg_rating > 0
+                            ? novel.avg_rating.toFixed(1)
                             : "—"}
+                          {novel.rating_count ? ` (${novel.rating_count})` : ""}
                         </span>
-                        {story.primary_genre && <span>{story.primary_genre}</span>}
+                        {novel.primary_genre && (
+                          <span>{pretty(novel.primary_genre)}</span>
+                        )}
+                        {novel.status && <span>{pretty(novel.status)}</span>}
+                        <span>{novel.chapters_total ?? "?"} chapters</span>
                       </div>
                     </div>
                   </div>
