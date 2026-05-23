@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabaseServer";
 import { supabaseServerClient } from "@/lib/supabaseServerSSR";
 import NovelBookmarkButton from "@/components/NovelBookmarkButton";
 import NovelRatingForm from "@/components/NovelRatingForm";
+import NovelCommentForm from "@/components/NovelCommentForm";
 
 export const dynamic = "force-dynamic";
 
@@ -31,15 +32,32 @@ type Novel = {
   view_count: number | null;
 };
 
+type NovelComment = {
+  id: number;
+  content: string;
+  created_at: string;
+  user_id: string;
+};
+
 function pretty(value: string | null | undefined) {
   if (!value) return "Unknown";
-  return value
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function isAssetUrl(url: string) {
   return /^https?:\/\//i.test(url.trim());
+}
+
+function formatDate(value: string) {
+  try {
+    return new Date(value).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return "";
+  }
 }
 
 export default async function NovelPage({
@@ -62,7 +80,6 @@ export default async function NovelPage({
 
   if (!novel) return notFound();
 
-  // Best-effort view increment
   await admin
     .from("novels")
     .update({ view_count: (novel.view_count ?? 0) + 1 })
@@ -96,9 +113,17 @@ export default async function NovelPage({
       typeof ratingRow?.rating === "number" ? ratingRow.rating : null;
   }
 
+  const { data: commentRows } = await admin
+    .from("novel_comments")
+    .select("id, content, created_at, user_id")
+    .eq("novel_id", novel.id)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  const comments = (commentRows as NovelComment[] | null) ?? [];
+
   const cover = (novel.cover_image_url || "").trim();
   const hasCover = !!cover && isAssetUrl(cover);
-
   const displayedViews = (novel.view_count ?? 0) + 1;
 
   return (
@@ -251,6 +276,41 @@ export default async function NovelPage({
         ) : (
           <p className="mt-2 text-sm text-gray-400">No tags yet.</p>
         )}
+      </section>
+
+      <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <h2 className="text-xl font-semibold text-white">Discussion</h2>
+
+          {comments.length === 0 ? (
+            <p className="mt-3 text-sm text-gray-400">
+              No comments yet. Be the first cultivator to speak.
+            </p>
+          ) : (
+            <ul className="mt-4 space-y-3">
+              {comments.map((comment) => (
+                <li
+                  key={comment.id}
+                  className="rounded-lg border border-white/10 bg-black/30 p-3"
+                >
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <span className="text-xs text-gray-500">
+                      Cultivator {comment.user_id.slice(0, 8)}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {formatDate(comment.created_at)}
+                    </span>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+                    {comment.content}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <NovelCommentForm novelId={novel.id} isAuthed={!!user} />
       </section>
     </main>
   );
