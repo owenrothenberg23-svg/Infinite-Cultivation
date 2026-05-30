@@ -6,6 +6,7 @@ import { supabaseServerClient } from "@/lib/supabaseServerSSR";
 import NovelBookmarkButton from "@/components/NovelBookmarkButton";
 import NovelRatingForm from "@/components/NovelRatingForm";
 import NovelCommentForm from "@/components/NovelCommentForm";
+import NovelReviewForm from "@/components/NovelReviewForm";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,16 @@ type NovelComment = {
   id: number;
   content: string;
   created_at: string;
+  user_id: string;
+};
+
+type NovelReview = {
+  id: number;
+  title: string | null;
+  review_text: string;
+  contains_spoilers: boolean;
+  created_at: string;
+  updated_at: string;
   user_id: string;
 };
 
@@ -121,6 +132,15 @@ export default async function NovelPage({
     .limit(20);
 
   const comments = (commentRows as NovelComment[] | null) ?? [];
+
+  const { data: reviewRows } = await admin
+    .from("novel_reviews")
+    .select("id, title, review_text, contains_spoilers, created_at, updated_at, user_id")
+    .eq("novel_id", novel.id)
+    .order("updated_at", { ascending: false })
+    .limit(20);
+
+  const reviews = (reviewRows as NovelReview[] | null) ?? [];
 
   const cover = (novel.cover_image_url || "").trim();
   const hasCover = !!cover && isAssetUrl(cover);
@@ -276,6 +296,51 @@ export default async function NovelPage({
         ) : (
           <p className="mt-2 text-sm text-gray-400">No tags yet.</p>
         )}
+      </section>
+
+      <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <h2 className="text-xl font-semibold text-white">Reviews</h2>
+
+          {reviews.length === 0 ? (
+            <p className="mt-3 text-sm text-gray-400">
+              No reviews yet. Be the first to leave a full review.
+            </p>
+          ) : (
+            <ul className="mt-4 space-y-4">
+              {reviews.map((review) => (
+                <li
+                  key={review.id}
+                  className="rounded-lg border border-white/10 bg-black/30 p-4"
+                >
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-white">
+                        {review.title || "Untitled Review"}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Cultivator {review.user_id.slice(0, 8)} ·{" "}
+                        {formatDate(review.updated_at || review.created_at)}
+                      </p>
+                    </div>
+
+                    {review.contains_spoilers && (
+                      <span className="rounded-full bg-red-500/15 px-2 py-1 text-[11px] font-medium text-red-300">
+                        Spoilers
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-300">
+                    {review.review_text}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <NovelReviewForm novelId={novel.id} isAuthed={!!user} />
       </section>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
