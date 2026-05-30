@@ -7,6 +7,7 @@ import NovelBookmarkButton from "@/components/NovelBookmarkButton";
 import NovelRatingForm from "@/components/NovelRatingForm";
 import NovelCommentForm from "@/components/NovelCommentForm";
 import NovelReviewForm from "@/components/NovelReviewForm";
+import AddNovelToListButton from "@/components/AddNovelToListButton";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,11 @@ type NovelReview = {
   created_at: string;
   updated_at: string;
   user_id: string;
+};
+
+type UserList = {
+  id: number;
+  title: string;
 };
 
 function pretty(value: string | null | undefined) {
@@ -102,6 +108,7 @@ export default async function NovelPage({
 
   let initialSaved = false;
   let initialRating: number | null = null;
+  let userLists: UserList[] = [];
 
   if (user) {
     const { data: bm } = await ssr
@@ -122,6 +129,14 @@ export default async function NovelPage({
 
     initialRating =
       typeof ratingRow?.rating === "number" ? ratingRow.rating : null;
+
+    const { data: listsRows } = await ssr
+      .from("novel_lists")
+      .select("id, title")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    userLists = (listsRows as UserList[] | null) ?? [];
   }
 
   const { data: commentRows } = await admin
@@ -135,7 +150,9 @@ export default async function NovelPage({
 
   const { data: reviewRows } = await admin
     .from("novel_reviews")
-    .select("id, title, review_text, contains_spoilers, created_at, updated_at, user_id")
+    .select(
+      "id, title, review_text, contains_spoilers, created_at, updated_at, user_id"
+    )
     .eq("novel_id", novel.id)
     .order("updated_at", { ascending: false })
     .limit(20);
@@ -271,11 +288,26 @@ export default async function NovelPage({
           </p>
         </div>
 
-        <NovelRatingForm
-          novelId={novel.id}
-          initialRating={initialRating}
-          isAuthed={!!user}
-        />
+        <div className="space-y-4">
+          <NovelRatingForm
+            novelId={novel.id}
+            initialRating={initialRating}
+            isAuthed={!!user}
+          />
+
+          <AddNovelToListButton
+            novelId={novel.id}
+            lists={userLists}
+            isAuthed={!!user}
+          />
+
+          <Link
+            href="/create-list"
+            className="inline-flex w-full justify-center rounded-md border border-white/10 bg-black/40 px-3 py-2 text-xs font-medium text-gray-200 hover:border-indigo-500 hover:text-white"
+          >
+            Create a new list
+          </Link>
+        </div>
       </section>
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
