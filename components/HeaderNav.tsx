@@ -49,29 +49,25 @@ export default function HeaderNav() {
           .maybeSingle();
 
         const p = profileData as ProfileRow | null;
-        if (p) {
-          baseName = p.display_name || p.username || baseName;
-        }
+        if (p) baseName = p.display_name || p.username || baseName;
 
         let activeTitleLabel: string | null = null;
 
-        const { data: activeUserTitle, error: activeErr } = await sb
+        const { data: activeUserTitle } = await sb
           .from("user_titles")
           .select("title_id")
           .eq("user_id", user.id)
           .eq("is_active", true)
           .maybeSingle();
 
-        if (!activeErr && activeUserTitle?.title_id) {
-          const { data: titleRow, error: titleErr } = await sb
+        if (activeUserTitle?.title_id) {
+          const { data: titleRow } = await sb
             .from("titles")
             .select("label")
             .eq("id", activeUserTitle.title_id)
             .maybeSingle();
 
-          if (!titleErr && titleRow) {
-            activeTitleLabel = titleRow.label ?? null;
-          }
+          activeTitleLabel = titleRow?.label ?? null;
         }
 
         setLabel(activeTitleLabel ? `${baseName} (${activeTitleLabel})` : baseName);
@@ -86,67 +82,40 @@ export default function HeaderNav() {
   }, []);
 
   return (
-    <nav className="flex items-center gap-4 text-sm">
+    <nav className="flex flex-wrap items-center gap-4 text-sm">
       <ModeToggle />
 
       {mode === "reader" ? (
         <>
-          <Link href="/library" className="text-gray-200 hover:text-white">
-            Library
-          </Link>
-          <Link href="/rankings" className="text-gray-200 hover:text-white">
-            Rankings
-          </Link>
-          <Link href="/dashboard?tab=reader" className="text-gray-300 hover:text-white">
-            My Saves
-          </Link>
-          <Link href="/titles" className="text-gray-300 hover:text-white">
-            Titles
-          </Link>
-          <Link href="/store" className="text-gray-300 hover:text-white">
-            Store
-          </Link>
-          <Link href="/new" className="text-gray-300 hover:text-white">
-            Add / Create
-          </Link>
+          <Link href="/library" className="text-gray-200 hover:text-white">Library</Link>
+          <Link href="/rankings" className="text-gray-200 hover:text-white">Rankings</Link>
+          <Link href="/lists" className="text-gray-300 hover:text-white">Lists</Link>
+          <Link href="/dashboard?tab=reader" className="text-gray-300 hover:text-white">Saved</Link>
+          <Link href="/titles" className="text-gray-300 hover:text-white">Titles</Link>
+          <Link href="/store" className="text-gray-300 hover:text-white">Store</Link>
+          <Link href="/add-novel" className="text-gray-300 hover:text-white">Add Novel</Link>
         </>
       ) : (
         <>
-          <Link href="/dashboard?tab=creator" className="text-gray-200 hover:text-white">
-            Dashboard
-          </Link>
-          <Link href="/new" className="text-gray-300 hover:text-white">
-            Add / Create
-          </Link>
-          <Link href="/library" className="text-gray-300 hover:text-white">
-            Library
-          </Link>
-          <Link href="/rankings" className="text-gray-300 hover:text-white">
-            Rankings
-          </Link>
-          <Link href="/titles" className="text-gray-300 hover:text-white">
-            Titles
-          </Link>
-          <Link href="/store" className="text-gray-300 hover:text-white">
-            Store
-          </Link>
+          <Link href="/dashboard?tab=creator" className="text-gray-200 hover:text-white">Dashboard</Link>
+          <Link href="/new" className="text-gray-300 hover:text-white">Write</Link>
+          <Link href="/add-novel" className="text-gray-300 hover:text-white">Add Novel</Link>
+          <Link href="/library" className="text-gray-300 hover:text-white">Library</Link>
+          <Link href="/rankings" className="text-gray-300 hover:text-white">Rankings</Link>
+          <Link href="/lists" className="text-gray-300 hover:text-white">Lists</Link>
         </>
       )}
 
-      <Link href="/account" className="text-gray-300 hover:text-white">
-        Account
-      </Link>
+      <Link href="/account" className="text-gray-300 hover:text-white">Account</Link>
 
       {loading ? (
         <span className="text-xs text-gray-500">...</span>
       ) : isAuthed ? (
-        <span className="max-w-[220px] truncate text-xs text-gray-300" title={label}>
+        <span className="max-w-[180px] truncate text-xs text-gray-300" title={label}>
           {label}
         </span>
       ) : (
-        <Link href="/login" className="text-gray-300 hover:text-white">
-          Login
-        </Link>
+        <Link href="/login" className="text-gray-300 hover:text-white">Login</Link>
       )}
     </nav>
   );

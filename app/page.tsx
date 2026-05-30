@@ -4,36 +4,6 @@ import Link from "next/link";
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-[#050816] text-gray-100">
-      <header className="sticky top-0 z-20 border-b border-white/5 bg-[#050816]/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/5 text-sm font-bold">
-              IC
-            </span>
-            <span className="font-semibold tracking-tight">
-              Infinite Cultivation
-            </span>
-          </Link>
-
-          <nav className="hidden items-center gap-6 text-sm text-gray-300 sm:flex">
-            <Link href="/library" className="hover:text-white">Library</Link>
-            <Link href="/rankings" className="hover:text-white">Rankings</Link>
-            <Link href="/dashboard" className="hover:text-white">Dashboard</Link>
-            <Link href="/new" className="hover:text-white">Create</Link>
-            <Link href="/login" className="hover:text-white">Sign in</Link>
-          </nav>
-
-          <div className="flex items-center gap-3">
-            <Link
-              href="/library"
-              className="rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow hover:bg-indigo-500"
-            >
-              Explore Novels
-            </Link>
-          </div>
-        </div>
-      </header>
-
       <section className="mx-auto max-w-6xl px-4 py-16">
         <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
           <div className="space-y-6">
@@ -52,8 +22,7 @@ export default function HomePage() {
             <p className="max-w-xl text-sm leading-relaxed text-gray-300 sm:text-base">
               Infinite Cultivation is becoming the discovery hub for xianxia,
               progression fantasy, and webnovels — rankings, reviews, tags,
-              reading lists, power systems, recommendations, and community-built
-              novel pages.
+              reading lists, recommendations, and community-built novel pages.
             </p>
 
             <div className="flex flex-wrap gap-4">
@@ -61,7 +30,7 @@ export default function HomePage() {
                 href="/library"
                 className="rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-indigo-500"
               >
-                Browse the Database
+                Browse Database
               </Link>
               <Link
                 href="/rankings"
@@ -70,10 +39,10 @@ export default function HomePage() {
                 View Rankings
               </Link>
               <Link
-                href="/new"
+                href="/add-novel"
                 className="rounded-md border border-white/10 px-5 py-2.5 text-sm font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
               >
-                Add / Create a Story
+                Add a Novel
               </Link>
             </div>
 
@@ -81,22 +50,19 @@ export default function HomePage() {
               <div>
                 <dt className="font-semibold text-white">Rank everything</dt>
                 <dd className="text-gray-400">
-                  Best MCs, best power systems, best completed novels, darkest
-                  stories, smartest protagonists, and more.
+                  Best MCs, power systems, completed novels, dark stories, and more.
                 </dd>
               </div>
               <div>
                 <dt className="font-semibold text-white">Find your next binge</dt>
                 <dd className="text-gray-400">
-                  Filter by tropes, tags, tone, pacing, romance, darkness,
-                  completion status, and reader ratings.
+                  Filter by tropes, tags, tone, pacing, status, and reader ratings.
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold text-white">Community profiles</dt>
+                <dt className="font-semibold text-white">Build your profile</dt>
                 <dd className="text-gray-400">
-                  Save novels, review stories, earn titles, and build your
-                  reader identity.
+                  Save novels, review stories, make lists, and earn titles.
                 </dd>
               </div>
             </dl>
@@ -105,20 +71,19 @@ export default function HomePage() {
           <div className="space-y-4">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg">
               <p className="text-xs uppercase tracking-[0.25em] text-indigo-300">
-                Coming next
+                Discovery Hub
               </p>
               <h2 className="mt-2 text-xl font-bold text-white">
-                Novel pages, rankings, and recommendation lists.
+                Rankings, reviews, tags, and reader-made lists.
               </h2>
               <p className="mt-2 text-sm leading-relaxed text-gray-300">
-                We’re expanding beyond hosted stories into a full webnovel index:
-                external novel pages, community ratings, trope filters, similar
-                reads, cultivation systems, and ranked lists.
+                A full webnovel index for cultivation readers: external novel pages,
+                community ratings, trope filters, similar reads, and ranked lists.
               </p>
 
               <div className="mt-5 grid gap-3 text-sm text-gray-300">
                 <div className="rounded-lg border border-white/10 bg-black/30 p-3">
-                  <b className="text-white">Top 100 Cultivation Novels</b>
+                  <b className="text-white">Top Cultivation Novels</b>
                   <p className="mt-1 text-xs text-gray-400">
                     Community-driven rankings for the genre.
                   </p>
@@ -126,14 +91,13 @@ export default function HomePage() {
                 <div className="rounded-lg border border-white/10 bg-black/30 p-3">
                   <b className="text-white">Trope & Tag Discovery</b>
                   <p className="mt-1 text-xs text-gray-400">
-                    Find ruthless MC, regression, sect building, alchemy, system,
-                    kingdom building, and more.
+                    Find ruthless MC, regression, sect building, alchemy, system, and more.
                   </p>
                 </div>
                 <div className="rounded-lg border border-white/10 bg-black/30 p-3">
                   <b className="text-white">Reader Lists</b>
                   <p className="mt-1 text-xs text-gray-400">
-                    Track what you’ve read, save future reads, and share lists.
+                    Save future reads and share curated recommendation lists.
                   </p>
                 </div>
               </div>
@@ -146,10 +110,10 @@ export default function HomePage() {
                   Explore Library
                 </Link>
                 <Link
-                  href="/dashboard?tab=reader"
+                  href="/lists"
                   className="rounded-md border border-white/10 px-4 py-2 text-xs font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
                 >
-                  My Saves
+                  Browse Lists
                 </Link>
               </div>
             </div>
@@ -160,110 +124,8 @@ export default function HomePage() {
               </p>
               <p className="mt-1 text-xs text-gray-400">
                 Hosted originals, creator dashboards, analytics, and optional AI
-                editing tools remain part of the platform — just no longer the
-                entire identity.
+                editing tools remain part of the platform.
               </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-4 pb-14">
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h3 className="text-sm font-semibold text-white">
-              For readers
-            </h3>
-            <p className="mt-2 text-sm leading-relaxed text-gray-300">
-              Discover, rank, review, save, and compare cultivation novels across
-              the entire webnovel ecosystem.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h3 className="text-sm font-semibold text-white">
-              For authors
-            </h3>
-            <p className="mt-2 text-sm leading-relaxed text-gray-300">
-              Publish hosted originals, track analytics, receive support, and use
-              optional editing tools to improve chapter quality.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h3 className="text-sm font-semibold text-white">
-              For the genre
-            </h3>
-            <p className="mt-2 text-sm leading-relaxed text-gray-300">
-              A dedicated home for xianxia, cultivation, progression fantasy,
-              power systems, sects, realms, and immortal ascension.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-4 pb-16">
-        <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-black/20 p-6">
-          <div className="grid gap-8 lg:grid-cols-2 lg:items-start">
-            <div className="space-y-3">
-              <p className="text-xs uppercase tracking-[0.25em] text-indigo-300">
-                The pivot
-              </p>
-              <h2 className="text-2xl font-bold text-white">
-                From story generator to cultivation discovery engine.
-              </h2>
-              <p className="text-sm leading-relaxed text-gray-300">
-                The future of Infinite Cultivation is a living database: novel
-                pages, rankings, tags, reviews, reader profiles, author tools,
-                and community-powered recommendations.
-              </p>
-
-              <div className="mt-5 flex flex-wrap gap-3">
-                <Link
-                  href="/library"
-                  className="rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"
-                >
-                  Browse novels
-                </Link>
-                <Link
-                  href="/new"
-                  className="rounded-md border border-white/10 px-5 py-2.5 text-sm font-semibold text-gray-200 hover:border-indigo-500 hover:text-white"
-                >
-                  Add a story
-                </Link>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-5 shadow-lg">
-              <h3 className="text-sm font-semibold text-gray-100">
-                Roadmap
-              </h3>
-              <ol className="mt-3 space-y-3 text-sm text-gray-300">
-                <li>
-                  <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">
-                    1
-                  </span>
-                  Build universal novel pages.
-                </li>
-                <li>
-                  <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">
-                    2
-                  </span>
-                  Add rankings and advanced filters.
-                </li>
-                <li>
-                  <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">
-                    3
-                  </span>
-                  Add reader lists, reviews, and profiles.
-                </li>
-                <li>
-                  <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold">
-                    4
-                  </span>
-                  Use AI for summaries, tags, recommendations, and author tools.
-                </li>
-              </ol>
             </div>
           </div>
         </div>
@@ -277,18 +139,10 @@ export default function HomePage() {
               novel database, ranking hub, and creator platform.
             </p>
             <div className="flex gap-4 text-xs text-gray-400">
-              <Link href="/library" className="hover:text-white">
-                Library
-              </Link>
-              <Link href="/rankings" className="hover:text-white">
-                Rankings
-              </Link>
-              <Link href="/dashboard" className="hover:text-white">
-                Dashboard
-              </Link>
-              <Link href="/new" className="hover:text-white">
-                Create
-              </Link>
+              <Link href="/library" className="hover:text-white">Library</Link>
+              <Link href="/rankings" className="hover:text-white">Rankings</Link>
+              <Link href="/lists" className="hover:text-white">Lists</Link>
+              <Link href="/add-novel" className="hover:text-white">Add Novel</Link>
             </div>
           </div>
         </div>
