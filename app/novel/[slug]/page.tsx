@@ -56,6 +56,19 @@ type UserList = {
   title: string;
 };
 
+type RelatedNovelRow = {
+  related_novel_id: string;
+  score: number | null;
+  novels: {
+    id: string;
+    slug: string;
+    title: string;
+    author_name: string | null;
+    cover_image_url: string | null;
+    avg_rating: number | null;
+  } | null;
+};
+
 function pretty(value: string | null | undefined) {
   if (!value) return "Unknown";
   return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -159,6 +172,28 @@ export default async function NovelPage({
 
   const reviews = (reviewRows as NovelReview[] | null) ?? [];
 
+  const { data: relatedRows } = await admin
+    .from("novel_relationships")
+    .select(
+      `
+      related_novel_id,
+      score,
+      novels:related_novel_id (
+        id,
+        slug,
+        title,
+        author_name,
+        cover_image_url,
+        avg_rating
+      )
+    `
+    )
+    .eq("novel_id", novel.id)
+    .order("score", { ascending: false })
+    .limit(8);
+
+  const relatedNovels = (relatedRows as RelatedNovelRow[] | null) ?? [];
+
   const cover = (novel.cover_image_url || "").trim();
   const hasCover = !!cover && isAssetUrl(cover);
   const displayedViews = (novel.view_count ?? 0) + 1;
@@ -222,12 +257,15 @@ export default async function NovelPage({
                 {pretty(novel.primary_genre)}
               </span>
             )}
+
             <span className="rounded-full bg-white/10 px-3 py-1 text-gray-300">
               {pretty(novel.status)}
             </span>
+
             <span className="rounded-full bg-white/10 px-3 py-1 text-gray-300">
               {pretty(novel.translation_status)}
             </span>
+
             {novel.country && (
               <span className="rounded-full bg-white/10 px-3 py-1 text-gray-300">
                 {novel.country}
@@ -327,6 +365,66 @@ export default async function NovelPage({
           </div>
         ) : (
           <p className="mt-2 text-sm text-gray-400">No tags yet.</p>
+        )}
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
+        <h2 className="text-xl font-semibold text-white">Readers Also Enjoyed</h2>
+        <p className="mt-1 text-sm text-gray-400">
+          Similar novels connected by the community.
+        </p>
+
+        {relatedNovels.length === 0 ? (
+          <p className="mt-4 text-sm text-gray-400">
+            No related novels added yet.
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {relatedNovels.map((row) => {
+              const related = row.novels;
+              if (!related) return null;
+
+              const relatedCover = (related.cover_image_url || "").trim();
+              const relatedHasCover = !!relatedCover && isAssetUrl(relatedCover);
+
+              return (
+                <Link
+                  key={related.id}
+                  href={`/novel/${related.slug}`}
+                  className="rounded-xl border border-white/10 bg-black/30 p-3 transition hover:border-indigo-500 hover:bg-white/10"
+                >
+                  <div className="h-40 overflow-hidden rounded-md border border-white/10 bg-black/40">
+                    {relatedHasCover ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={relatedCover}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-gradient-to-br from-indigo-500/25 via-sky-500/20 to-emerald-500/20" />
+                    )}
+                  </div>
+
+                  <h3 className="mt-3 line-clamp-2 text-sm font-semibold text-white">
+                    {related.title}
+                  </h3>
+
+                  <p className="mt-1 line-clamp-1 text-xs text-gray-400">
+                    {related.author_name || "Unknown author"}
+                  </p>
+
+                  <p className="mt-2 text-xs text-gray-500">
+                    ★{" "}
+                    {typeof related.avg_rating === "number" &&
+                    related.avg_rating > 0
+                      ? related.avg_rating.toFixed(1)
+                      : "—"}
+                  </p>
+                </Link>
+              );
+            })}
+          </div>
         )}
       </section>
 
