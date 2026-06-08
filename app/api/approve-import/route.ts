@@ -23,17 +23,90 @@ function slugify(input: string) {
     .replace(/^-+|-+$/g, "");
 }
 
+function normalizeTag(tag: string) {
+  const cleaned = tag.trim().toLowerCase().replace(/\s+/g, "_");
+
+  const map: Record<string, string> = {
+    cultivation_novel: "cultivation",
+    cultivator: "cultivation",
+    xianxia_novel: "xianxia",
+    wuxia_novel: "wuxia",
+    ruthless: "ruthless_mc",
+    ruthless_protagonist: "ruthless_mc",
+    villain_mc: "antihero",
+    anti_hero: "antihero",
+    overpowered: "op_mc",
+    overpowered_mc: "op_mc",
+    system_cheat: "system",
+    game_system: "system",
+    reincarnation: "transmigration",
+    transmigrated: "transmigration",
+    time_regression: "regression",
+    kingdom: "kingdom_building",
+    sect: "sect_politics",
+    sect_building: "sect_politics",
+  };
+
+  return map[cleaned] || cleaned;
+}
+
+function normalizeGenre(raw: string) {
+  const g = normalizeTag(raw || "");
+
+  const map: Record<string, string> = {
+    cultivation: "xianxia",
+    chinese_fantasy: "xianxia",
+    progression: "progression_fantasy",
+    progression_fantasy: "progression_fantasy",
+    fantasy: "fantasy",
+    xianxia: "xianxia",
+    wuxia: "wuxia",
+    xuanhuan: "xuanhuan",
+    urban_cultivation: "urban",
+    urban: "urban",
+    sci_fantasy: "sci_fantasy",
+    scifi: "sci_fantasy",
+    sci_fi: "sci_fantasy",
+  };
+
+  return map[g] || g || null;
+}
+
 function intOrNull(v: FormDataEntryValue | null) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function cleanTags(raw: string) {
-  return raw
-    .split(",")
-    .map((t) => t.trim().toLowerCase().replace(/\s+/g, "_"))
-    .filter(Boolean)
-    .slice(0, 30);
+  return Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map(normalizeTag)
+        .filter(Boolean)
+    )
+  ).slice(0, 30);
+}
+
+async function uniqueSlug(admin: ReturnType<typeof supabaseAdmin>, title: string) {
+  const baseSlug = slugify(title);
+  if (!baseSlug) return "";
+
+  let slug = baseSlug;
+  let suffix = 2;
+
+  while (true) {
+    const { data: existing } = await admin
+      .from("novels")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle();
+
+    if (!existing) return slug;
+
+    slug = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
 }
 
 export async function POST(req: Request) {
@@ -86,21 +159,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
     }
 
-    const baseSlug = slugify(title);
-    let slug = baseSlug;
-    let suffix = 2;
+    const { data: existingTitle } = await admin
+      .from("novels")
+      .select("id, title")
+      .ilike("title", title)
+      .maybeSingle();
 
-    while (true) {
-      const { data: existing } = await admin
-        .from("novels")
-        .select("id")
-        .eq("slug", slug)
-        .maybeSingle();
+    if (existingTitle) {
+      return NextResponse.json(
+        { error: `Possible duplicate already exists: ${existingTitle.title}` },
+        { status: 409 }
+      );
+    }
 
-      if (!existing) break;
-
-      slug = `${baseSlug}-${suffix}`;
-      suffix += 1;
+    const slug = await uniqueSlug(admin, title);
+    if (!slug) {
+      return NextResponse.json({ error: "Could not create slug" }, { status: 400 });
     }
 
     const { data: novel, error: novelErr } = await admin
@@ -113,10 +187,10 @@ export async function POST(req: Request) {
         source_url: f("source_url") || null,
         cover_image_url: f("cover_image_url") || null,
         synopsis: f("synopsis") || null,
-        primary_genre: f("primary_genre") || null,
+        primary_genre: normalizeGenre(f("primary_genre")),
         tags: cleanTags(f("tags")),
-        status: f("status") || "unknown",
-        translation_status: f("translation_status") || "unknown",
+        status: normalizeTag(f("status") || "unknown"),
+        translation_status: normalizeTag(f("translation_status") || "unknown"),
         chapters_total: intOrNull(fd.get("chapters_total")),
         country: f("country") || null,
       })

@@ -27,13 +27,87 @@ function intOrNull(value: string | undefined) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function normalizeTag(tag: string) {
+  const cleaned = tag.trim().toLowerCase().replace(/\s+/g, "_");
+
+  const map: Record<string, string> = {
+    cultivation_novel: "cultivation",
+    cultivator: "cultivation",
+    cultivation_world: "cultivation",
+    xianxia_novel: "xianxia",
+    wuxia_novel: "wuxia",
+    ruthless: "ruthless_mc",
+    ruthless_protagonist: "ruthless_mc",
+    villain_mc: "antihero",
+    anti_hero: "antihero",
+    overpowered: "op_mc",
+    overpowered_mc: "op_mc",
+    system_cheat: "system",
+    game_system: "system",
+    reincarnation: "transmigration",
+    transmigrated: "transmigration",
+    time_regression: "regression",
+    kingdom: "kingdom_building",
+    sect: "sect_politics",
+    sect_building: "sect_politics",
+  };
+
+  return map[cleaned] || cleaned;
+}
+
+function normalizeGenre(raw: string | undefined) {
+  const g = normalizeTag(raw || "");
+
+  const map: Record<string, string> = {
+    cultivation: "xianxia",
+    chinese_fantasy: "xianxia",
+    progression: "progression_fantasy",
+    progression_fantasy: "progression_fantasy",
+    fantasy: "fantasy",
+    xianxia: "xianxia",
+    wuxia: "wuxia",
+    xuanhuan: "xuanhuan",
+    urban_cultivation: "urban",
+    urban: "urban",
+    sci_fantasy: "sci_fantasy",
+    scifi: "sci_fantasy",
+    sci_fi: "sci_fantasy",
+  };
+
+  return map[g] || g || null;
+}
+
 function cleanTags(raw: string | undefined) {
   if (!raw) return [];
-  return raw
-    .split(",")
-    .map((t) => t.trim().toLowerCase().replace(/\s+/g, "_"))
-    .filter(Boolean)
-    .slice(0, 30);
+  return Array.from(
+    new Set(
+      raw
+        .split(",")
+        .map(normalizeTag)
+        .filter(Boolean)
+    )
+  ).slice(0, 30);
+}
+
+async function uniqueSlug(admin: ReturnType<typeof supabaseAdmin>, title: string) {
+  const base = slugify(title);
+  if (!base) return "";
+
+  let slug = base;
+  let suffix = 2;
+
+  while (true) {
+    const { data } = await admin
+      .from("novels")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle();
+
+    if (!data) return slug;
+
+    slug = `${base}-${suffix}`;
+    suffix++;
+  }
 }
 
 export async function POST(req: Request) {
@@ -79,29 +153,29 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const baseSlug = slugify(title);
-      if (!baseSlug) {
+      const slug = await uniqueSlug(admin, title);
+      if (!slug) {
         skipped++;
         continue;
       }
 
-      const { data: existing } = await admin
+      const { data: exactDuplicate } = await admin
         .from("novels")
         .select("id")
-        .eq("slug", baseSlug)
+        .ilike("title", title)
         .maybeSingle();
 
-      if (existing) {
+      if (exactDuplicate) {
         skipped++;
         continue;
       }
 
       prepared.push({
         title,
-        slug: baseSlug,
+        slug,
         author_name: authorRaw || null,
-        primary_genre: genreRaw || null,
-        status: statusRaw || "unknown",
+        primary_genre: normalizeGenre(genreRaw),
+        status: normalizeTag(statusRaw || "unknown"),
         chapters_total: intOrNull(chaptersRaw),
         tags: cleanTags(tagsRaw),
         source_url: sourceUrlRaw || null,
@@ -119,11 +193,7 @@ export async function POST(req: Request) {
     }
 
     if (prepared.length === 0) {
-      return NextResponse.json({
-        success: true,
-        inserted: 0,
-        skipped,
-      });
+      return NextResponse.json({ success: true, inserted: 0, skipped });
     }
 
     const { error } = await admin.from("novels").insert(prepared);
