@@ -88,6 +88,15 @@ function cleanTags(raw: string) {
   ).slice(0, 30);
 }
 
+function safeJsonParse(raw: string | null) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 async function uniqueSlug(admin: ReturnType<typeof supabaseAdmin>, title: string) {
   const baseSlug = slugify(title);
   if (!baseSlug) return "";
@@ -128,6 +137,16 @@ export async function POST(req: Request) {
     }
 
     const admin = supabaseAdmin();
+
+    const { data: importRow } = await admin
+      .from("novel_import_queue")
+      .select("*")
+      .eq("id", importId)
+      .maybeSingle();
+
+    if (!importRow) {
+      return NextResponse.json({ error: "Import row not found" }, { status: 404 });
+    }
 
     if (action === "reject" || action === "duplicate") {
       const { error } = await admin
@@ -177,18 +196,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Could not create slug" }, { status: 400 });
     }
 
+    const sourceUrl = f("source_url") || null;
+    const sourceSite = f("source_site") || null;
+    const coverUrl = f("cover_image_url") || null;
+    const synopsis = f("synopsis") || null;
+    const tags = cleanTags(f("tags"));
+
     const { data: novel, error: novelErr } = await admin
       .from("novels")
       .insert({
         slug,
         title,
         author_name: f("author_name") || null,
-        source_site: f("source_site") || null,
-        source_url: f("source_url") || null,
-        cover_image_url: f("cover_image_url") || null,
-        synopsis: f("synopsis") || null,
+        source_site: sourceSite,
+        source_url: sourceUrl,
+        cover_image_url: coverUrl,
+        synopsis,
         primary_genre: normalizeGenre(f("primary_genre")),
-        tags: cleanTags(f("tags")),
+        tags,
         status: normalizeTag(f("status") || "unknown"),
         translation_status: normalizeTag(f("translation_status") || "unknown"),
         chapters_total: intOrNull(fd.get("chapters_total")),
@@ -202,6 +227,44 @@ export async function POST(req: Request) {
         { error: novelErr?.message || "Failed to create novel" },
         { status: 500 }
       );
+    }
+
+    const rawPayloadParsed = safeJsonParse(importRow.raw_payload);
+    const sourceData = rawPayloadParsed?.source_data_for_novel_sources || null;
+
+    if (sourceUrl && sourceSite) {
+      const { error: sourceErr } = await admin.from("novel_sources").upsert(
+        {
+          novel_id: novel.id,
+          source_site: sourceData?.source_site || sourceSite,
+          source_url: sourceData?.source_url || sourceUrl,
+
+          external_title: sourceData?.external_title || title,
+          external_author: sourceData?.external_author || f("author_name") || null,
+          external_rating: sourceData?.external_rating ?? null,
+          external_rating_count: sourceData?.external_rating_count ?? null,
+          external_review_count: sourceData?.external_review_count ?? null,
+
+          external_cover_url: sourceData?.external_cover_url || coverUrl,
+          external_synopsis: sourceData?.external_synopsis || synopsis,
+          external_genres: sourceData?.external_genres || [],
+          external_tags: sourceData?.external_tags || tags,
+
+          raw_payload: rawPayloadParsed,
+          scraped_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "source_url",
+        }
+      );
+
+      if (sourceErr) {
+        return NextResponse.json(
+          { error: `Novel created, but source insert failed: ${sourceErr.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     const { error: updateErr } = await admin
