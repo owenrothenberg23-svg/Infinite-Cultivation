@@ -38,7 +38,13 @@ function decodeHtml(s: string) {
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+function stripTags(s: string) {
+  return decodeHtml(s.replace(/<[^>]*>/g, " "));
 }
 
 function getMeta(html: string, key: string) {
@@ -74,12 +80,50 @@ function getTitle(html: string) {
   if (og) return og.split("|")[0].split(" - ")[0].trim();
 
   const match = html.match(/<title[^>]*>(.*?)<\/title>/i);
-  if (match?.[1]) return decodeHtml(match[1]).split("|")[0].split(" - ")[0].trim();
+  if (match?.[1]) {
+    return decodeHtml(match[1]).split("|")[0].split(" - ")[0].trim();
+  }
 
   return null;
 }
 
+function cleanTag(raw: string) {
+  return raw.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^\w-]/g, "");
+}
+
+function extractNumber(raw: string | null) {
+  if (!raw) return null;
+  const match = raw.replace(/,/g, "").match(/(\d+(\.\d+)?)/);
+  return match ? Number(match[1]) : null;
+}
+
+function extractNovelUpdatesData(html: string) {
+  const ratingMatch =
+    html.match(/rating[^<]{0,60}(\d+(\.\d+)?)/i) ||
+    html.match(/(\d+(\.\d+)?)\s*\/\s*5/i);
+
+  const authorMatch =
+    html.match(/Associated Names[\s\S]{0,500}?<\/div>/i) ||
+    html.match(/Author\(s\)[\s\S]{0,500}?<\/div>/i);
+
+  return {
+    rating: extractNumber(ratingMatch?.[0] || null),
+    authorHint: authorMatch ? stripTags(authorMatch[0]) : null,
+  };
+}
+
+function extractRoyalRoadData(html: string) {
+  const ratingMatch =
+    html.match(/rating[^<]{0,80}(\d+(\.\d+)?)/i) ||
+    html.match(/(\d+(\.\d+)?)\s*\/\s*5/i);
+
+  return {
+    rating: extractNumber(ratingMatch?.[0] || null),
+  };
+}
+
 function extractMetadata(html: string, url: string) {
+  const sourceSite = sourceSiteFromUrl(url);
   const title = getTitle(html);
 
   const synopsis =
@@ -98,21 +142,47 @@ function extractMetadata(html: string, url: string) {
     null;
 
   const keywords = getMeta(html, "keywords");
+
   const tags =
     keywords
       ?.split(",")
-      .map((t) => t.trim().toLowerCase().replace(/\s+/g, "_"))
+      .map(cleanTag)
       .filter(Boolean)
-      .slice(0, 20) || null;
+      .slice(0, 30) || [];
+
+  let externalRating: number | null = null;
+  let externalRatingCount: number | null = null;
+
+  if (sourceSite?.includes("novelupdates")) {
+    const nu = extractNovelUpdatesData(html);
+    externalRating = nu.rating;
+  }
+
+  if (sourceSite?.includes("royalroad")) {
+    const rr = extractRoyalRoadData(html);
+    externalRating = rr.rating;
+  }
 
   return {
     source_url: url,
+    source_site: sourceSite,
+
     suggested_title: title,
     suggested_author: author,
     suggested_synopsis: synopsis,
     suggested_cover_url: cover,
-    suggested_source_site: sourceSiteFromUrl(url),
+    suggested_source_site: sourceSite,
     suggested_tags: tags,
+
+    external_title: title,
+    external_author: author,
+    external_synopsis: synopsis,
+    external_cover_url: cover,
+    external_tags: tags,
+    external_genres: [],
+    external_rating: externalRating,
+    external_rating_count: externalRatingCount,
+    external_review_count: null,
   };
 }
 
@@ -157,7 +227,10 @@ export async function POST(req: Request) {
     const uniqueUrls = Array.from(new Set(rawUrls));
 
     if (uniqueUrls.length === 0) {
-      return NextResponse.json({ error: "No valid URLs supplied" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No valid URLs supplied" },
+        { status: 400 }
+      );
     }
 
     const admin = supabaseAdmin();
@@ -194,18 +267,29 @@ export async function POST(req: Request) {
         const html = await fetchHtml(url);
         const meta = extractMetadata(html, url);
 
+        const rawPayload = {
+          imported_from_url: url,
+          extracted_at: new Date().toISOString(),
+          extracted: meta,
+          source_data_for_novel_sources: {
+            source_site: meta.source_site,
+            source_url: url,
+            external_title: meta.external_title,
+            external_author: meta.external_author,
+            external_rating: meta.external_rating,
+            external_rating_count: meta.external_rating_count,
+            external_review_count: meta.external_review_count,
+            external_cover_url: meta.external_cover_url,
+            external_synopsis: meta.external_synopsis,
+            external_genres: meta.external_genres,
+            external_tags: meta.external_tags,
+          },
+        };
+
         const { error } = await admin.from("novel_import_queue").insert({
           source_url: url,
           raw_title: meta.suggested_title,
-          raw_payload: JSON.stringify(
-            {
-              imported_from_url: url,
-              extracted_at: new Date().toISOString(),
-              extracted: meta,
-            },
-            null,
-            2
-          ),
+          raw_payload: JSON.stringify(rawPayload, null, 2),
           suggested_title: meta.suggested_title,
           suggested_author: meta.suggested_author,
           suggested_synopsis: meta.suggested_synopsis,
