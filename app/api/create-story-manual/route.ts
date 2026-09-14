@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseServer } from "@/lib/supabase";
+import { supabaseRLSFromAuthHeader } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -11,37 +11,55 @@ function toBool(v: FormDataEntryValue | null) {
 
 function cleanTags(raw: unknown): string[] | null {
   if (!Array.isArray(raw)) return null;
+
   const cleaned = raw
     .map((t) => String(t).trim())
     .filter((t) => t.length > 0 && t.length <= 40)
     .slice(0, 20);
+
   return cleaned.length ? cleaned : null;
 }
 
 export async function POST(req: Request) {
   try {
-    const sb = getSupabaseServer();
+    const sb = await supabaseRLSFromAuthHeader();
 
-    // cookie auth
     const { data: userData, error: userErr } = await sb.auth.getUser();
+
     if (userErr || !userData?.user) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Not authenticated" },
+        { status: 401 }
+      );
     }
+
     const userId = userData.user.id;
 
     const fd = await req.formData();
-    const f = (k: string, d = "") => String(fd.get(k) ?? d).trim();
+    const f = (key: string, fallback = "") =>
+      String(fd.get(key) ?? fallback).trim();
 
     const title = f("title");
-    if (!title) return NextResponse.json({ error: "Title is required" }, { status: 400 });
+
+    if (!title) {
+      return NextResponse.json(
+        { error: "Title is required" },
+        { status: 400 }
+      );
+    }
 
     const story_pitch = f("story_pitch");
 
-    const genres = fd.getAll("genres").map((x) => String(x));
+    const genres = fd
+      .getAll("genres")
+      .map((value) => String(value).trim())
+      .filter(Boolean);
+
     const primary_genre = f("primary_genre") || null;
 
     let tags_json: string[] | null = null;
     const tagsRaw = f("tags_json");
+
     if (tagsRaw) {
       try {
         tags_json = cleanTags(JSON.parse(tagsRaw));
@@ -70,51 +88,76 @@ export async function POST(req: Request) {
     const initial_chapter_title = f("initial_chapter_title");
     const initial_chapter_content = f("initial_chapter_content");
 
-    // 1) Insert story (CONSISTENT SCHEMA)
     const { data: story, error: storyErr } = await sb
       .from("stories")
       .insert({
-        user_id: userId,                    // ✅ ALWAYS SET
+        user_id: userId,
         title,
         story_pitch: story_pitch || null,
         prefs_json,
         genres: genres.length ? genres : null,
         primary_genre,
         tags_json,
-        last_chapter_number: 1,             // because we create chapter 1 below
+        last_chapter_number: 1,
       })
       .select("id")
       .single();
 
     if (storyErr || !story?.id) {
       console.error("create-story-manual: story insert error", storyErr);
-      return NextResponse.json({ error: storyErr?.message || "Failed to create story" }, { status: 500 });
-    }
 
-    const storyId = story.id as string;
-
-    // 2) Create chapter 1 (draft)
-    const chapterRow: any = {
-      story_id: storyId,
-      chapter_number: 1,
-      title: initial_chapter_title || null,
-      draft_content: initial_chapter_content || "",
-      content: initial_chapter_content || "", // compatibility
-      final_content: null,
-    };
-
-    const { error: chErr } = await sb.from("chapters").insert(chapterRow);
-    if (chErr) {
-      console.error("create-story-manual: chapter insert error", chErr);
       return NextResponse.json(
-        { error: "Story created but failed to create chapter 1" },
+        { error: storyErr?.message || "Failed to create story" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ ok: true, story: { id: storyId } }, { status: 200 });
-  } catch (err: any) {
+    const storyId = story.id as string;
+
+    const chapterRow = {
+      story_id: storyId,
+      chapter_number: 1,
+      title: initial_chapter_title || null,
+      draft_content: initial_chapter_content || "",
+      content: initial_chapter_content || "",
+      final_content: null,
+    };
+
+    const { error: chapterErr } = await sb
+      .from("chapters")
+      .insert(chapterRow);
+
+    if (chapterErr) {
+      console.error(
+        "create-story-manual: chapter insert error",
+        chapterErr
+      );
+
+      return NextResponse.json(
+        {
+          error: "Story created but failed to create chapter 1",
+          story: { id: storyId },
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        story: { id: storyId },
+      },
+      { status: 200 }
+    );
+  } catch (err: unknown) {
     console.error("create-story-manual fatal:", err);
-    return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });
+
+    return NextResponse.json(
+      {
+        error:
+          err instanceof Error ? err.message : "Unknown error",
+      },
+      { status: 500 }
+    );
   }
 }

@@ -1,22 +1,54 @@
+// app/api/admin/url-import/route.ts
+
 import { NextResponse } from "next/server";
+import { parseNovelMetadata } from "@/lib/novelImport";
+import { fetchNovelSource } from "@/lib/novelImport/fetchSource";
+import type { ImportedNovelMetadata } from "@/lib/novelImport/types";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { supabaseServerClient } from "@/lib/supabaseServerSSR";
 
 export const runtime = "nodejs";
 
+type ImportRawPayload = {
+  imported_from_url: string;
+  extracted_at: string;
+  extraction_status: "success" | "failed";
+  extraction_error?: string;
+  extracted?: ImportedNovelMetadata;
+  source_data_for_novel_sources: {
+    source_site: string | null;
+    source_url: string;
+    external_title: string | null;
+    external_author: string | null;
+    external_rating: number | null;
+    external_rating_count: number | null;
+    external_review_count: number | null;
+    external_cover_url: string | null;
+    external_synopsis: string | null;
+    external_genres: string[];
+    external_tags: string[];
+  };
+};
+
 function isAdmin(email: string | undefined | null) {
   const admins = (process.env.ADMIN_EMAILS || "")
     .split(",")
-    .map((e) => e.trim().toLowerCase())
+    .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
 
-  return !!email && admins.includes(email.toLowerCase());
+  return Boolean(email && admins.includes(email.toLowerCase()));
 }
 
 function cleanUrl(raw: string) {
   try {
     const url = new URL(raw.trim());
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
     url.hash = "";
+
     return url.toString();
   } catch {
     return null;
@@ -25,211 +57,191 @@ function cleanUrl(raw: string) {
 
 function sourceSiteFromUrl(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
   } catch {
     return null;
   }
 }
 
-function decodeHtml(s: string) {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, `"`)
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+function titleFromUrl(url: string) {
+  try {
+    const pathname = new URL(url).pathname;
 
-function stripTags(s: string) {
-  return decodeHtml(s.replace(/<[^>]*>/g, " "));
-}
+    const finalSegment =
+      pathname
+        .split("/")
+        .filter(Boolean)
+        .pop() || "";
 
-function getMeta(html: string, key: string) {
-  const patterns = [
-    new RegExp(
-      `<meta[^>]+property=["']${key}["'][^>]+content=["']([^"']+)["'][^>]*>`,
-      "i"
-    ),
-    new RegExp(
-      `<meta[^>]+name=["']${key}["'][^>]+content=["']([^"']+)["'][^>]*>`,
-      "i"
-    ),
-    new RegExp(
-      `<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${key}["'][^>]*>`,
-      "i"
-    ),
-    new RegExp(
-      `<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${key}["'][^>]*>`,
-      "i"
-    ),
-  ];
+    if (!finalSegment) {
+      return null;
+    }
 
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match?.[1]) return decodeHtml(match[1]);
+    return finalSegment
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (character) => character.toUpperCase())
+      .trim();
+  } catch {
+    return null;
   }
-
-  return null;
 }
 
-function getTitle(html: string) {
-  const og = getMeta(html, "og:title") || getMeta(html, "twitter:title");
-  if (og) return og.split("|")[0].split(" - ")[0].trim();
-
-  const match = html.match(/<title[^>]*>(.*?)<\/title>/i);
-  if (match?.[1]) {
-    return decodeHtml(match[1]).split("|")[0].split(" - ")[0].trim();
-  }
-
-  return null;
-}
-
-function cleanTag(raw: string) {
-  return raw.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^\w-]/g, "");
-}
-
-function extractNumber(raw: string | null) {
-  if (!raw) return null;
-  const match = raw.replace(/,/g, "").match(/(\d+(\.\d+)?)/);
-  return match ? Number(match[1]) : null;
-}
-
-function extractNovelUpdatesData(html: string) {
-  const ratingMatch =
-    html.match(/rating[^<]{0,60}(\d+(\.\d+)?)/i) ||
-    html.match(/(\d+(\.\d+)?)\s*\/\s*5/i);
-
-  const authorMatch =
-    html.match(/Associated Names[\s\S]{0,500}?<\/div>/i) ||
-    html.match(/Author\(s\)[\s\S]{0,500}?<\/div>/i);
-
+function buildSourcePayload(
+  url: string,
+  metadata: ImportedNovelMetadata
+): ImportRawPayload["source_data_for_novel_sources"] {
   return {
-    rating: extractNumber(ratingMatch?.[0] || null),
-    authorHint: authorMatch ? stripTags(authorMatch[0]) : null,
+    source_site: metadata.source_site,
+    source_url: url,
+    external_title: metadata.external_title,
+    external_author: metadata.external_author,
+    external_rating: metadata.external_rating,
+    external_rating_count: metadata.external_rating_count,
+    external_review_count: metadata.external_review_count,
+    external_cover_url: metadata.external_cover_url,
+    external_synopsis: metadata.external_synopsis,
+    external_genres: metadata.external_genres,
+    external_tags: metadata.external_tags,
   };
 }
 
-function extractRoyalRoadData(html: string) {
-  const ratingMatch =
-    html.match(/rating[^<]{0,80}(\d+(\.\d+)?)/i) ||
-    html.match(/(\d+(\.\d+)?)\s*\/\s*5/i);
-
-  return {
-    rating: extractNumber(ratingMatch?.[0] || null),
-  };
-}
-
-function extractMetadata(html: string, url: string) {
+function buildFailedMetadata(
+  url: string,
+  errorMessage: string
+): {
+  meta: ImportedNovelMetadata;
+  rawPayload: ImportRawPayload;
+} {
   const sourceSite = sourceSiteFromUrl(url);
-  const title = getTitle(html);
+  const fallbackTitle = titleFromUrl(url);
 
-  const synopsis =
-    getMeta(html, "og:description") ||
-    getMeta(html, "twitter:description") ||
-    getMeta(html, "description");
-
-  const cover =
-    getMeta(html, "og:image") ||
-    getMeta(html, "twitter:image") ||
-    getMeta(html, "twitter:image:src");
-
-  const author =
-    getMeta(html, "author") ||
-    html.match(/author[^<]{0,40}<\/?[^>]*>\s*([^<]{2,80})/i)?.[1]?.trim() ||
-    null;
-
-  const keywords = getMeta(html, "keywords");
-
-  const tags =
-    keywords
-      ?.split(",")
-      .map(cleanTag)
-      .filter(Boolean)
-      .slice(0, 30) || [];
-
-  let externalRating: number | null = null;
-  let externalRatingCount: number | null = null;
-
-  if (sourceSite?.includes("novelupdates")) {
-    const nu = extractNovelUpdatesData(html);
-    externalRating = nu.rating;
-  }
-
-  if (sourceSite?.includes("royalroad")) {
-    const rr = extractRoyalRoadData(html);
-    externalRating = rr.rating;
-  }
-
-  return {
+  const meta: ImportedNovelMetadata = {
     source_url: url,
     source_site: sourceSite,
 
-    suggested_title: title,
-    suggested_author: author,
-    suggested_synopsis: synopsis,
-    suggested_cover_url: cover,
+    suggested_title: fallbackTitle,
+    suggested_author: null,
+    suggested_synopsis: null,
+    suggested_cover_url: null,
     suggested_source_site: sourceSite,
-    suggested_tags: tags,
+    suggested_primary_genre: null,
+    suggested_tags: [],
 
-    external_title: title,
-    external_author: author,
-    external_synopsis: synopsis,
-    external_cover_url: cover,
-    external_tags: tags,
+    external_title: fallbackTitle,
+    external_author: null,
+    external_synopsis: null,
+    external_cover_url: null,
     external_genres: [],
-    external_rating: externalRating,
-    external_rating_count: externalRatingCount,
+    external_tags: [],
+    external_rating: null,
+    external_rating_count: null,
     external_review_count: null,
+
+    chapters_total: null,
+    status: null,
+    extraction_method: "url_fallback",
+  };
+
+  return {
+    meta,
+    rawPayload: {
+      imported_from_url: url,
+      extracted_at: new Date().toISOString(),
+      extraction_status: "failed",
+      extraction_error: errorMessage,
+      source_data_for_novel_sources: buildSourcePayload(url, meta),
+    },
   };
 }
 
-async function fetchHtml(url: string) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+async function alreadyExists(
+  admin: ReturnType<typeof supabaseAdmin>,
+  url: string
+) {
+  const { data: existingNovel, error: novelError } = await admin
+    .from("novels")
+    .select("id")
+    .eq("source_url", url)
+    .maybeSingle();
 
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; InfiniteCultivationBot/1.0; metadata import)",
-        Accept: "text/html,application/xhtml+xml",
-      },
-      cache: "no-store",
-    });
+  if (novelError) throw novelError;
+  if (existingNovel) return true;
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  } finally {
-    clearTimeout(timeout);
-  }
+  const { data: existingSource, error: sourceError } = await admin
+    .from("novel_sources")
+    .select("id")
+    .eq("source_url", url)
+    .maybeSingle();
+
+  if (sourceError) throw sourceError;
+  if (existingSource) return true;
+
+  const { data: existingQueue, error: queueError } = await admin
+    .from("novel_import_queue")
+    .select("id")
+    .eq("source_url", url)
+    .in("status", ["pending", "approved"])
+    .maybeSingle();
+
+  if (queueError) throw queueError;
+
+  return Boolean(existingQueue);
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
     const ssr = await supabaseServerClient();
-    const { data: userData } = await ssr.auth.getUser();
+
+    const {
+      data: userData,
+      error: userError,
+    } = await ssr.auth.getUser();
+
+    if (userError) {
+      return NextResponse.json(
+        {
+          error: `Authentication failed: ${userError.message}`,
+        },
+        {
+          status: 401,
+        }
+      );
+    }
+
     const user = userData?.user;
 
     if (!isAdmin(user?.email)) {
-      return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+      return NextResponse.json(
+        {
+          error: "Not authorized",
+        },
+        {
+          status: 403,
+        }
+      );
     }
 
-    const body = (await req.json().catch(() => ({}))) as { urls?: string };
-    const rawUrls = String(body.urls || "")
-      .split("\n")
-      .map((u) => cleanUrl(u))
-      .filter(Boolean) as string[];
+    const body = (await request.json().catch(() => ({}))) as {
+      urls?: string;
+    };
 
-    const uniqueUrls = Array.from(new Set(rawUrls));
+    const urls = Array.from(
+      new Set(
+        String(body.urls || "")
+          .split("\n")
+          .map(cleanUrl)
+          .filter((value): value is string => Boolean(value))
+      )
+    );
 
-    if (uniqueUrls.length === 0) {
+    if (urls.length === 0) {
       return NextResponse.json(
-        { error: "No valid URLs supplied" },
-        { status: 400 }
+        {
+          error: "No valid URLs supplied",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
@@ -239,73 +251,112 @@ export async function POST(req: Request) {
     let skipped = 0;
     let failed = 0;
 
-    for (const url of uniqueUrls.slice(0, 100)) {
+    const results: Array<{
+      url: string;
+      status: "queued" | "skipped" | "failed";
+      extraction_status?: "success" | "failed";
+      extraction_method?: string;
+      error?: string;
+    }> = [];
+
+    for (const url of urls.slice(0, 100)) {
       try {
-        const { data: existingNovel } = await admin
-          .from("novels")
-          .select("id")
-          .eq("source_url", url)
-          .maybeSingle();
+        if (await alreadyExists(admin, url)) {
+          skipped += 1;
 
-        if (existingNovel) {
-          skipped++;
+          results.push({
+            url,
+            status: "skipped",
+          });
+
           continue;
         }
 
-        const { data: existingQueue } = await admin
+        let meta: ImportedNovelMetadata;
+        let rawPayload: ImportRawPayload;
+
+        try {
+          const source = await fetchNovelSource(url);
+
+          meta = parseNovelMetadata(
+            source.html,
+            url,
+            {
+              auxiliary: source.auxiliary,
+            }
+          );
+
+          rawPayload = {
+            imported_from_url: url,
+            extracted_at: new Date().toISOString(),
+            extraction_status: "success",
+            extracted: meta,
+            source_data_for_novel_sources: buildSourcePayload(
+              url,
+              meta
+            ),
+          };
+        } catch (fetchError: unknown) {
+          const message =
+            fetchError instanceof Error
+              ? fetchError.message
+              : "Metadata fetch failed";
+
+          const fallback = buildFailedMetadata(url, message);
+
+          meta = fallback.meta;
+          rawPayload = fallback.rawPayload;
+        }
+
+        const { error: insertError } = await admin
           .from("novel_import_queue")
-          .select("id")
-          .eq("source_url", url)
-          .in("status", ["pending", "approved"])
-          .maybeSingle();
+          .insert({
+            source_url: url,
+            raw_title: meta.suggested_title,
+            raw_payload: JSON.stringify(rawPayload, null, 2),
 
-        if (existingQueue) {
-          skipped++;
-          continue;
+            suggested_title: meta.suggested_title,
+            suggested_author: meta.suggested_author,
+            suggested_synopsis: meta.suggested_synopsis,
+            suggested_cover_url: meta.suggested_cover_url,
+            suggested_source_site: meta.suggested_source_site,
+            suggested_primary_genre:
+              meta.suggested_primary_genre,
+            suggested_tags: meta.suggested_tags,
+            suggested_status: meta.status,
+            suggested_chapters_total: meta.chapters_total,
+
+            created_by: user!.id,
+            status: "pending",
+          });
+
+        if (insertError) {
+          throw insertError;
         }
 
-        const html = await fetchHtml(url);
-        const meta = extractMetadata(html, url);
+        queued += 1;
 
-        const rawPayload = {
-          imported_from_url: url,
-          extracted_at: new Date().toISOString(),
-          extracted: meta,
-          source_data_for_novel_sources: {
-            source_site: meta.source_site,
-            source_url: url,
-            external_title: meta.external_title,
-            external_author: meta.external_author,
-            external_rating: meta.external_rating,
-            external_rating_count: meta.external_rating_count,
-            external_review_count: meta.external_review_count,
-            external_cover_url: meta.external_cover_url,
-            external_synopsis: meta.external_synopsis,
-            external_genres: meta.external_genres,
-            external_tags: meta.external_tags,
-          },
-        };
-
-        const { error } = await admin.from("novel_import_queue").insert({
-          source_url: url,
-          raw_title: meta.suggested_title,
-          raw_payload: JSON.stringify(rawPayload, null, 2),
-          suggested_title: meta.suggested_title,
-          suggested_author: meta.suggested_author,
-          suggested_synopsis: meta.suggested_synopsis,
-          suggested_cover_url: meta.suggested_cover_url,
-          suggested_source_site: meta.suggested_source_site,
-          suggested_tags: meta.suggested_tags,
-          created_by: user!.id,
-          status: "pending",
+        results.push({
+          url,
+          status: "queued",
+          extraction_status: rawPayload.extraction_status,
+          extraction_method: meta.extraction_method,
         });
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unknown import error";
 
-        if (error) throw error;
+        console.warn("URL import failed:", url, error);
 
-        queued++;
-      } catch (e) {
-        console.warn("URL import failed:", url, e);
-        failed++;
+        failed += 1;
+
+        results.push({
+          url,
+          status: "failed",
+          error: message,
+        });
       }
     }
 
@@ -314,11 +365,21 @@ export async function POST(req: Request) {
       queued,
       skipped,
       failed,
+      results,
     });
-  } catch (e: any) {
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown route error";
+
     return NextResponse.json(
-      { error: e?.message || "Unknown error" },
-      { status: 500 }
+      {
+        error: message,
+      },
+      {
+        status: 500,
+      }
     );
   }
 }

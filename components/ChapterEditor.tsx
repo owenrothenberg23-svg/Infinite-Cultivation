@@ -13,9 +13,11 @@ type Props = {
   initialTitle?: string;
 };
 
-type AiMode = "fix" | "rewrite" | "continue" | "suggest";
+type AssistMode = "fix" | "rewrite" | "continue" | "suggest";
 
-function mapMode(mode: AiMode): "grammar" | "rewrite" | "continue" | "suggest" {
+function mapMode(
+  mode: AssistMode
+): "grammar" | "rewrite" | "continue" | "suggest" {
   switch (mode) {
     case "fix":
       return "grammar";
@@ -25,9 +27,13 @@ function mapMode(mode: AiMode): "grammar" | "rewrite" | "continue" | "suggest" {
       return "continue";
     case "suggest":
       return "suggest";
-    default:
-      return "grammar";
   }
+}
+
+function wordCount(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
 }
 
 export default function ChapterEditor({
@@ -51,21 +57,26 @@ export default function ChapterEditor({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
-  // autosave
-  const lastSavedHashRef = useRef<string>("");
-  const autosaveTimerRef = useRef<any>(null);
+  const lastSavedHashRef = useRef("");
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // AI tools
-  const [aiMode, setAiMode] = useState<AiMode>("fix");
-  const [aiInstruction, setAiInstruction] = useState("");
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiOut, setAiOut] = useState<string>("");
-  const [aiErr, setAiErr] = useState<string | null>(null);
+  const [showAssist, setShowAssist] = useState(false);
+  const [assistMode, setAssistMode] = useState<AssistMode>("fix");
+  const [assistInstruction, setAssistInstruction] = useState("");
+  const [assistBusy, setAssistBusy] = useState(false);
+  const [assistOutput, setAssistOutput] = useState("");
+  const [assistError, setAssistError] = useState<string | null>(null);
 
-  // Check if current user is the author
+  const words = wordCount(content);
+  const characters = content.length;
+
   useEffect(() => {
     let cancelled = false;
-    if (!authorId) return;
+
+    if (!authorId) {
+      setCanEdit(false);
+      return;
+    }
 
     (async () => {
       try {
@@ -73,9 +84,11 @@ export default function ChapterEditor({
         const { data } = await sb.auth.getSession();
         const userId = data.session?.user?.id ?? null;
 
-        if (!cancelled) setCanEdit(!!userId && userId === authorId);
-      } catch (e) {
-        console.error("ChapterEditor: session check error", e);
+        if (!cancelled) {
+          setCanEdit(!!userId && userId === authorId);
+        }
+      } catch (err) {
+        console.error("ChapterEditor session check failed", err);
         if (!cancelled) setCanEdit(false);
       }
     })();
@@ -85,7 +98,6 @@ export default function ChapterEditor({
     };
   }, [authorId]);
 
-  // Keep local state in sync when not actively editing
   useEffect(() => {
     if (!editing) setContent(initialContent);
   }, [initialContent, editing]);
@@ -94,18 +106,20 @@ export default function ChapterEditor({
     if (!editing) setTitle(initialTitle);
   }, [initialTitle, editing]);
 
-  // Autosave while editing (every 8s if changed)
   useEffect(() => {
     if (!editing) return;
 
     const hash = `${title.trim()}__${content}`;
+
     if (hash === lastSavedHashRef.current) return;
 
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
 
     autosaveTimerRef.current = setTimeout(async () => {
       try {
-        const res = await fetch("/api/save-draft", {
+        const response = await fetch("/api/save-draft", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -117,24 +131,55 @@ export default function ChapterEditor({
           }),
         });
 
-        const data = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        const data = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          throw new Error(data?.error || `HTTP ${response.status}`);
+        }
 
         lastSavedHashRef.current = hash;
         setStatus("Draft autosaved.");
         setError(null);
-      } catch (e: any) {
-        console.warn("autosave failed", e);
-        setError(e?.message || "Autosave failed");
+      } catch (err: unknown) {
+        console.warn("Chapter autosave failed", err);
+        setError(
+          err instanceof Error ? err.message : "Autosave failed."
+        );
       }
     }, 8000);
 
     return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
     };
   }, [editing, title, content, storyId, chapterNumber]);
 
   if (!canEdit) return null;
+
+  async function saveDraft() {
+    const trimmedTitle = title.trim();
+
+    const response = await fetch("/api/save-draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        storyId,
+        chapterNumber,
+        title: trimmedTitle || null,
+        content,
+      }),
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(data?.error || `HTTP ${response.status}`);
+    }
+
+    lastSavedHashRef.current = `${trimmedTitle}__${content}`;
+  }
 
   async function handleSaveDraftNow() {
     setError(null);
@@ -142,26 +187,12 @@ export default function ChapterEditor({
     setSaving(true);
 
     try {
-      const trimmedTitle = title.trim();
-      const res = await fetch("/api/save-draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          storyId,
-          chapterNumber,
-          title: trimmedTitle || null,
-          content,
-        }),
-      });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-
-      lastSavedHashRef.current = `${trimmedTitle}__${content}`;
+      await saveDraft();
       setStatus("Draft saved.");
-    } catch (err: any) {
-      setError(err?.message || "Could not save draft.");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Could not save draft."
+      );
     } finally {
       setSaving(false);
     }
@@ -171,35 +202,50 @@ export default function ChapterEditor({
     setError(null);
     setStatus(null);
 
-    const trimmed = content.trim();
-    if (!trimmed) {
+    if (!content.trim()) {
       setError("Chapter content cannot be empty.");
       return;
     }
 
     setFinalizing(true);
-    try {
-      // ensure latest draft saved first
-      await handleSaveDraftNow();
 
-      const res = await fetch("/api/finalize-chapter", {
+    try {
+      await saveDraft();
+
+      const response = await fetch("/api/finalize-chapter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ storyId, chapterNumber }),
       });
 
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      const data = await response.json().catch(() => null);
 
-      setStatus("Finalized! Readers will see the updated chapter.");
+      if (!response.ok) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+
+      setStatus("Chapter finalized successfully.");
       setEditing(false);
+      setShowAssist(false);
+      setAssistOutput("");
       router.refresh();
-    } catch (err: any) {
-      setError(err?.message || "Failed to finalize.");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to finalize chapter."
+      );
     } finally {
       setFinalizing(false);
     }
+  }
+
+  function startEditing() {
+    setEditing(true);
+    setStatus(null);
+    setError(null);
+    setAssistOutput("");
+    setAssistError(null);
+    lastSavedHashRef.current = `${initialTitle.trim()}__${initialContent}`;
   }
 
   function handleCancel() {
@@ -208,238 +254,298 @@ export default function ChapterEditor({
     setStatus(null);
     setContent(initialContent);
     setTitle(initialTitle);
-    setAiOut("");
-    setAiErr(null);
+    setShowAssist(false);
+    setAssistOutput("");
+    setAssistError(null);
   }
 
-  async function runAi() {
-    setAiErr(null);
-    setAiOut("");
+  async function runAssist() {
+    setAssistError(null);
+    setAssistOutput("");
     setStatus(null);
 
-    const txt = content.trim();
-    if (!txt) {
-      setAiErr("Nothing to run AI on (chapter is empty).");
+    const text = content.trim();
+
+    if (!text) {
+      setAssistError("Add chapter text before using writing assistance.");
       return;
     }
 
-    setAiBusy(true);
+    setAssistBusy(true);
+
     try {
-      // ✅ Use centralized client wrapper (ensures POST + credentials + consistent shape)
       const result = await callEditAssist({
-        text: txt,
-        mode: mapMode(aiMode),
-        instruction: aiInstruction || undefined,
+        text,
+        mode: mapMode(assistMode),
+        instruction: assistInstruction.trim() || undefined,
       });
 
-      const out = String(result || "").trim();
-      setAiOut(out);
-      if (!out) setAiErr("AI returned empty output.");
-    } catch (e: any) {
-      setAiErr(e?.message || "AI request failed.");
+      const output = String(result || "").trim();
+
+      if (!output) {
+        setAssistError("No output was returned.");
+        return;
+      }
+
+      setAssistOutput(output);
+    } catch (err: unknown) {
+      setAssistError(
+        err instanceof Error ? err.message : "Writing assistance failed."
+      );
     } finally {
-      setAiBusy(false);
+      setAssistBusy(false);
     }
   }
 
-  function applyAiReplace() {
-    if (!aiOut.trim()) return;
-    setContent(aiOut);
-    setAiOut("");
-    setAiErr(null);
-    setStatus("AI result applied to editor (not saved yet).");
+  function replaceWithAssistOutput() {
+    if (!assistOutput.trim()) return;
+
+    setContent(assistOutput);
+    setAssistOutput("");
+    setAssistError(null);
+    setStatus("Suggestion applied to the editor. Save when ready.");
   }
 
-  function applyAiAppend() {
-    if (!aiOut.trim()) return;
-    setContent((prev) => prev.trimEnd() + "\n\n" + aiOut.trim());
-    setAiOut("");
-    setAiErr(null);
-    setStatus("AI continuation appended (not saved yet).");
+  function appendAssistOutput() {
+    if (!assistOutput.trim()) return;
+
+    setContent((previous) => {
+      const current = previous.trimEnd();
+      return current
+        ? `${current}\n\n${assistOutput.trim()}`
+        : assistOutput.trim();
+    });
+
+    setAssistOutput("");
+    setAssistError(null);
+    setStatus("Continuation added to the editor. Save when ready.");
   }
 
-  async function copyAi() {
+  async function copyAssistOutput() {
     try {
-      await navigator.clipboard.writeText(aiOut || "");
-      setStatus("Copied AI output.");
+      await navigator.clipboard.writeText(assistOutput || "");
+      setStatus("Suggestion copied.");
     } catch {
-      setAiErr("Could not copy to clipboard.");
+      setAssistError("Could not copy to clipboard.");
     }
   }
 
   return (
-    <section className="mt-10 border-t border-white/10 pt-6">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold text-gray-200">Author tools</h3>
-
-        {!editing ? (
-          <button
-            type="button"
-            onClick={() => {
-              setEditing(true);
-              setStatus(null);
-              setError(null);
-              setAiOut("");
-              setAiErr(null);
-            }}
-            className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
-          >
-            Edit chapter
-          </button>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleCancel}
-              disabled={saving || finalizing || aiBusy}
-              className="rounded-md border border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-gray-800 disabled:opacity-50"
-            >
-              Cancel
-            </button>
+    <div>
+      {!editing ? (
+        <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">
+                Chapter {chapterNumber}
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                {words.toLocaleString("en-US")} words ·{" "}
+                {characters.toLocaleString("en-US")} characters
+              </p>
+            </div>
 
             <button
               type="button"
-              onClick={handleSaveDraftNow}
-              disabled={saving || finalizing || aiBusy}
-              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+              onClick={startEditing}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
             >
-              {saving ? "Saving…" : "Save draft"}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleFinalize}
-              disabled={saving || finalizing || aiBusy}
-              className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-            >
-              {finalizing ? "Finalizing…" : "Finalize / Publish"}
+              Edit Chapter
             </button>
           </div>
-        )}
-      </div>
 
-      {editing ? (
-        <>
-          <p className="mb-2 text-xs text-gray-400">
-            Drafts autosave while you edit. Finalize to publish the updated version.
+          <p className="mt-3 text-xs text-gray-500">
+            Only you can access editing controls for this chapter.
           </p>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs text-gray-500">
+              <span>{words.toLocaleString("en-US")} words</span>
+              <span className="mx-2 text-gray-700">•</span>
+              <span>{characters.toLocaleString("en-US")} characters</span>
+              <span className="mx-2 text-gray-700">•</span>
+              <span>Autosaves after changes</span>
+            </div>
 
-          <div className="mb-3">
-            <label className="block text-xs uppercase tracking-[0.2em] text-gray-400">
-              Chapter title
-            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={saving || finalizing || assistBusy}
+                className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs font-medium text-gray-300 hover:border-white/20 hover:text-white disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveDraftNow}
+                disabled={saving || finalizing || assistBusy}
+                className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save Draft"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleFinalize}
+                disabled={saving || finalizing || assistBusy}
+                className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {finalizing ? "Finalizing..." : "Finalize Chapter"}
+              </button>
+            </div>
+          </div>
+
+          <label className="block">
+            <span className="text-xs uppercase tracking-[0.18em] text-gray-500">
+              Chapter Title
+            </span>
+
             <input
-              className="mt-1 w-full rounded-md border border-gray-700 bg-slate-950 px-3 py-2 text-sm text-gray-100 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(event) => setTitle(event.target.value)}
               placeholder={`Chapter ${chapterNumber}`}
               maxLength={120}
+              className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-indigo-500"
             />
-            <p className="mt-1 text-[11px] text-gray-500">
-              Leave blank to fall back to “Chapter {chapterNumber}”.
-            </p>
-          </div>
+          </label>
 
-          <textarea
-            className="mt-1 w-full min-h-[320px] rounded-md border border-gray-700 bg-slate-950 px-3 py-2 text-sm text-gray-100 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-          />
+          <label className="block">
+            <span className="text-xs uppercase tracking-[0.18em] text-gray-500">
+              Chapter Draft
+            </span>
 
-          {/* ✅ AI tools panel */}
-          <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-[0.25em] text-indigo-300">
-                  AI Assist
+            <textarea
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              spellCheck
+              className="mt-2 min-h-[520px] w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-4 text-[15px] leading-7 text-gray-100 outline-none placeholder:text-gray-600 focus:border-indigo-500"
+              placeholder="Write your chapter..."
+            />
+          </label>
+
+          <div className="rounded-xl border border-white/10 bg-black/20">
+            <button
+              type="button"
+              onClick={() => {
+                setShowAssist((value) => !value);
+                setAssistError(null);
+              }}
+              className="flex w-full items-center justify-between gap-4 p-4 text-left"
+            >
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Optional Writing Assistance
                 </p>
-                <p className="text-xs text-gray-400">
-                  Fix grammar, rewrite, continue, or get suggestions (preview before applying).
+                <p className="mt-1 text-xs text-gray-500">
+                  Grammar, rewriting, continuation, and feedback tools.
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <select
-                  value={aiMode}
-                  onChange={(e) => setAiMode(e.target.value as AiMode)}
-                  className="rounded-md border border-gray-700 bg-slate-950 px-3 py-2 text-xs text-gray-100"
-                >
-                  <option value="fix">Fix typos / grammar</option>
-                  <option value="rewrite">Rewrite (stronger prose)</option>
-                  <option value="continue">Continue scene</option>
-                  <option value="suggest">Suggestions only</option>
-                </select>
+              <span className="text-xs text-indigo-300">
+                {showAssist ? "Hide" : "Open"}
+              </span>
+            </button>
 
-                <button
-                  type="button"
-                  onClick={runAi}
-                  disabled={aiBusy || saving || finalizing}
-                  className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  {aiBusy ? "Running…" : "Run AI"}
-                </button>
-              </div>
-            </div>
+            {showAssist && (
+              <div className="border-t border-white/10 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <label className="flex-1">
+                    <span className="text-xs text-gray-400">Tool</span>
 
-            <div className="mt-3">
-              <label className="block text-[11px] uppercase tracking-[0.2em] text-gray-400">
-                Optional instruction
-              </label>
-              <input
-                value={aiInstruction}
-                onChange={(e) => setAiInstruction(e.target.value)}
-                placeholder='e.g. "keep it ruthless", "make dialogue snappier", "remove purple prose"'
-                className="mt-1 w-full rounded-md border border-gray-700 bg-slate-950 px-3 py-2 text-xs text-gray-100"
-              />
-            </div>
+                    <select
+                      value={assistMode}
+                      onChange={(event) =>
+                        setAssistMode(event.target.value as AssistMode)
+                      }
+                      className="mt-1 w-full rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-sm text-gray-100 outline-none focus:border-indigo-500"
+                    >
+                      <option value="fix">Fix grammar & typos</option>
+                      <option value="rewrite">Rewrite passage</option>
+                      <option value="continue">Draft a continuation</option>
+                      <option value="suggest">Give suggestions</option>
+                    </select>
+                  </label>
 
-            {(aiErr || aiOut) && (
-              <div className="mt-3 rounded-lg border border-white/10 bg-black/40 p-3">
-                {aiErr && <p className="text-xs text-red-300">{aiErr}</p>}
+                  <button
+                    type="button"
+                    onClick={runAssist}
+                    disabled={assistBusy || saving || finalizing}
+                    className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {assistBusy ? "Working..." : "Generate Preview"}
+                  </button>
+                </div>
 
-                {aiOut && (
-                  <>
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-gray-400">
-                      Output preview
-                    </p>
+                <label className="mt-4 block">
+                  <span className="text-xs text-gray-400">
+                    Optional instruction
+                  </span>
 
-                    <div className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-sm text-gray-200">
-                      {aiOut}
+                  <input
+                    value={assistInstruction}
+                    onChange={(event) =>
+                      setAssistInstruction(event.target.value)
+                    }
+                    placeholder='Example: "Make the dialogue tighter without changing the characters."'
+                    className="mt-1 w-full rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-indigo-500"
+                  />
+                </label>
+
+                <p className="mt-3 text-xs leading-relaxed text-gray-500">
+                  Results are previews only. Nothing changes in your chapter
+                  unless you explicitly apply it, and applied text is not saved
+                  until you save or finalize.
+                </p>
+
+                {assistError && (
+                  <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-300">
+                    {assistError}
+                  </div>
+                )}
+
+                {assistOutput && (
+                  <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-slate-950">
+                    <div className="border-b border-white/10 px-4 py-3">
+                      <p className="text-xs uppercase tracking-[0.18em] text-indigo-300">
+                        Preview
+                      </p>
                     </div>
 
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {aiMode === "continue" ? (
+                    <div className="max-h-80 overflow-auto whitespace-pre-wrap px-4 py-4 text-sm leading-6 text-gray-200">
+                      {assistOutput}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 border-t border-white/10 p-3">
+                      {assistMode === "continue" ? (
                         <button
                           type="button"
-                          onClick={applyAiAppend}
-                          className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                          onClick={appendAssistOutput}
+                          className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
                         >
-                          Append to chapter
+                          Append to Draft
                         </button>
-                      ) : aiMode === "suggest" ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setStatus("Review suggestions above. No changes applied.");
-                          }}
-                          className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/10"
-                        >
-                          OK
-                        </button>
+                      ) : assistMode === "suggest" ? (
+                        <span className="inline-flex items-center px-1 text-xs text-gray-500">
+                          Suggestions are not applied automatically.
+                        </span>
                       ) : (
                         <button
                           type="button"
-                          onClick={applyAiReplace}
-                          className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                          onClick={replaceWithAssistOutput}
+                          className="rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
                         >
-                          Replace chapter text
+                          Replace Draft Text
                         </button>
                       )}
 
                       <button
                         type="button"
-                        onClick={copyAi}
-                        className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/10"
+                        onClick={copyAssistOutput}
+                        className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-white/10 hover:text-white"
                       >
                         Copy
                       </button>
@@ -447,32 +553,53 @@ export default function ChapterEditor({
                       <button
                         type="button"
                         onClick={() => {
-                          setAiOut("");
-                          setAiErr(null);
+                          setAssistOutput("");
+                          setAssistError(null);
                         }}
-                        className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/10"
+                        className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-white/10 hover:text-white"
                       >
                         Clear
                       </button>
                     </div>
-
-                    <p className="mt-2 text-[11px] text-gray-500">
-                      Applying AI changes only updates the editor. You still control Save/Finalize.
-                    </p>
-                  </>
+                  </div>
                 )}
               </div>
             )}
           </div>
-        </>
-      ) : (
-        <p className="text-xs text-gray-500">
-          Only you can see this section. Edit drafts, then finalize when ready.
-        </p>
-      )}
 
-      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-      {status && <p className="mt-2 text-xs text-emerald-400">{status}</p>}
-    </section>
+          {error && (
+            <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+          {status && (
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-300">
+              {status}
+            </div>
+          )}
+
+          <div className="flex flex-wrap justify-end gap-2 border-t border-white/10 pt-4">
+            <button
+              type="button"
+              onClick={handleSaveDraftNow}
+              disabled={saving || finalizing || assistBusy}
+              className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save Draft"}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleFinalize}
+              disabled={saving || finalizing || assistBusy}
+              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {finalizing ? "Finalizing..." : "Finalize Chapter"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

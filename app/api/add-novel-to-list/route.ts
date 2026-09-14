@@ -9,8 +9,13 @@ export async function POST(req: Request) {
     const sb = await supabaseServerClient();
 
     const { data: userData, error: userErr } = await sb.auth.getUser();
-    if (userErr || !userData?.user) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const user = userData?.user ?? null;
+
+    if (userErr || !user) {
+      return NextResponse.json(
+        { error: "Not authenticated" },
+        { status: 401 }
+      );
     }
 
     const body = (await req.json().catch(() => ({}))) as {
@@ -21,10 +26,54 @@ export async function POST(req: Request) {
     const novelId = String(body.novelId || "").trim();
     const listId = Number(body.listId);
 
-    if (!novelId || !Number.isFinite(listId)) {
+    if (!novelId || !Number.isInteger(listId) || listId <= 0) {
       return NextResponse.json(
-        { error: "Missing novelId or listId" },
+        { error: "Missing or invalid novelId/listId" },
         { status: 400 }
+      );
+    }
+
+    // Never trust a client-supplied list ID by itself.
+    const { data: list, error: listErr } = await sb
+      .from("novel_lists")
+      .select("id")
+      .eq("id", listId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (listErr) {
+      console.error("add-novel-to-list list lookup error:", listErr);
+      return NextResponse.json(
+        { error: "Could not verify list ownership" },
+        { status: 500 }
+      );
+    }
+
+    if (!list) {
+      return NextResponse.json(
+        { error: "List not found or not owned by you" },
+        { status: 403 }
+      );
+    }
+
+    const { data: novel, error: novelErr } = await sb
+      .from("novels")
+      .select("id")
+      .eq("id", novelId)
+      .maybeSingle();
+
+    if (novelErr) {
+      console.error("add-novel-to-list novel lookup error:", novelErr);
+      return NextResponse.json(
+        { error: "Could not verify novel" },
+        { status: 500 }
+      );
+    }
+
+    if (!novel) {
+      return NextResponse.json(
+        { error: "Novel not found" },
+        { status: 404 }
       );
     }
 
@@ -33,16 +82,25 @@ export async function POST(req: Request) {
       novel_id: novelId,
     });
 
-    const msg = String(error?.message || "").toLowerCase();
+    const message = String(error?.message || "").toLowerCase();
 
-    if (error && !msg.includes("duplicate") && !msg.includes("unique")) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (
+      error &&
+      !message.includes("duplicate") &&
+      !message.includes("unique")
+    ) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({ ok: true }, { status: 200 });
-  } catch (e: any) {
+  } catch (err: unknown) {
     return NextResponse.json(
-      { error: e?.message || "Unknown error" },
+      {
+        error: err instanceof Error ? err.message : "Unknown error",
+      },
       { status: 500 }
     );
   }

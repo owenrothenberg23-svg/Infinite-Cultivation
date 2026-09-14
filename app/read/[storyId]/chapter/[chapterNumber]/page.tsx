@@ -1,18 +1,48 @@
 // app/read/[storyId]/chapter/[chapterNumber]/page.tsx
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getSupabaseServer } from "@/lib/supabase";
-import { supabaseAdmin } from "@/lib/supabaseServer"; // ✅ needed for view increments (your current pattern)
-import GenerateButton from "@/components/GenerateButton";
+import { supabaseServerClient } from "@/lib/supabaseServerSSR";
 import ChapterEditor from "@/components/ChapterEditor";
+import DeleteChapterButton from "@/components/DeleteChapterButton";
 
 type Params = { storyId: string; chapterNumber: string };
 
-function safeParseInt(v: unknown): number | null {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  const i = Math.trunc(n);
-  return i > 0 ? i : null;
+type StoryRow = {
+  id: string;
+  title: string;
+  last_chapter_number: number | null;
+  user_id: string | null;
+  author_id: string | null;
+  is_public: boolean | null;
+};
+
+type ChapterRow = {
+  id: string;
+  chapter_number: number;
+  title: string | null;
+  final_content: string | null;
+  draft_content: string | null;
+  content: string | null;
+  created_at: string;
+};
+
+type MemoryRow = {
+  kind: string | null;
+  content: string | null;
+  chapter_number: number | null;
+};
+
+type CanonicalNovel = {
+  id: string;
+  slug: string;
+};
+
+function safeParseInt(value: unknown): number | null {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+
+  const integer = Math.trunc(number);
+  return integer > 0 ? integer : null;
 }
 
 export default async function ChapterPage({
@@ -20,254 +50,336 @@ export default async function ChapterPage({
 }: {
   params: Promise<Params> | Params;
 }) {
-  // ✅ Next 15/16 safe params resolve
-  const p =
-    typeof (params as any)?.then === "function"
-      ? (((await params) as any) ?? ({} as Params))
-      : ((params as any) ?? ({} as Params));
-
-  const storyId = p?.storyId;
+  const p = (await params) as Params;
+  const storyId = p?.storyId?.trim();
   const chapterNum = safeParseInt(p?.chapterNumber);
 
-  if (!storyId || !chapterNum) {
-    return (
-      <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-4">
-        <h1 className="text-2xl font-bold">Invalid chapter</h1>
-        <p className="text-gray-400">That chapter number doesn’t look right.</p>
-        <Link
-          href={storyId ? `/read/${storyId}` : "/library"}
-          className="text-indigo-400 hover:underline"
-        >
-          ← Back
-        </Link>
-      </main>
-    );
-  }
+  if (!storyId || !chapterNum) return notFound();
 
-  const supabase = getSupabaseServer();
+  const supabase = await supabaseServerClient();
 
-  // ✅ auth (needed to allow authors to read private stories/chapters)
   const { data: userData } = await supabase.auth.getUser();
   const viewerId = userData?.user?.id ?? null;
 
-  // ✅ Load story (include is_public + author_id support)
-  const { data: story, error: storyErr } = await supabase
+  const { data: storyData, error: storyError } = await supabase
     .from("stories")
-    .select("id, title, last_chapter_number, user_id, author_id, is_public, view_count")
+    .select(
+      "id, title, last_chapter_number, user_id, author_id, is_public"
+    )
     .eq("id", storyId)
     .maybeSingle();
 
-  if (storyErr || !story) {
+  if (storyError || !storyData) return notFound();
+
+  const story = storyData as StoryRow;
+
+  const isOwner =
+    !!viewerId &&
+    (story.user_id === viewerId || story.author_id === viewerId);
+
+  if (!isOwner && !story.is_public) return notFound();
+
+  const { data: chapterData, error: chapterError } = await supabase
+    .from("chapters")
+    .select(
+      "id, chapter_number, title, final_content, draft_content, content, created_at"
+    )
+    .eq("story_id", storyId)
+    .eq("chapter_number", chapterNum)
+    .eq("is_deleted", false)
+    .maybeSingle();
+
+  if (chapterError || !chapterData) {
+    const last = Number(story.last_chapter_number ?? 0);
+
     return (
-      <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-4">
-        <h1 className="text-2xl font-bold">Story not found</h1>
-        <Link href="/library" className="text-indigo-400 hover:underline">
-          ← Back to Library
+      <main className="mx-auto max-w-4xl px-4 py-10 text-gray-100">
+        <Link
+          href={`/read/${storyId}`}
+          className="text-sm text-indigo-300 hover:underline"
+        >
+          ← Back to story
         </Link>
+
+        <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+          <p className="text-xs uppercase tracking-[0.2em] text-gray-500">
+            Chapter {chapterNum}
+          </p>
+
+          <h1 className="mt-2 text-2xl font-bold text-white">
+            Chapter not available
+          </h1>
+
+          <p className="mt-2 text-sm text-gray-400">
+            This chapter does not exist, has been removed, or is not available
+            yet.
+          </p>
+
+          {last > 0 && (
+            <Link
+              href={`/read/${storyId}/chapter/${last}`}
+              className="mt-5 inline-flex rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+            >
+              Go to latest chapter
+            </Link>
+          )}
+        </div>
       </main>
     );
   }
 
-  const isOwner =
-    !!viewerId && (story.user_id === viewerId || story.author_id === viewerId);
+  const chapter = chapterData as ChapterRow;
 
-  // ✅ protect private stories from non-owners
-  if (!isOwner && !story.is_public) return notFound();
+  const chapterText =
+    chapter.final_content ??
+    chapter.draft_content ??
+    chapter.content ??
+    "";
 
-  // ✅ Load the chapter and IGNORE deleted chapters
-  const { data: chapter, error: chapErr } = await supabase
-    .from("chapters")
-    .select(
-      "id, chapter_number, title, final_content, draft_content, content, created_at, is_deleted, deleted_at"
-    )
-    .eq("story_id", storyId)
-    .eq("chapter_number", chapterNum)
-    .eq("is_deleted", false) // ✅ critical
-    .maybeSingle();
+  const [
+    { data: memoryData },
+    { data: prevRow },
+    { data: nextRow },
+    { data: novelData },
+  ] = await Promise.all([
+    isOwner
+      ? supabase
+          .from("memories")
+          .select("kind, content, chapter_number")
+          .eq("story_id", storyId)
+          .lte("chapter_number", chapterNum)
+          .order("chapter_number", { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: null }),
 
-  // If missing/deleted => show the friendly "hasn't manifested" state
-  if (chapErr || !chapter) {
-    const last = Number(story.last_chapter_number ?? 0);
+    supabase
+      .from("chapters")
+      .select("chapter_number")
+      .eq("story_id", storyId)
+      .eq("is_deleted", false)
+      .lt("chapter_number", chapterNum)
+      .order("chapter_number", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
 
-    return (
-      <main className="max-w-3xl mx-auto p-8 text-gray-200 space-y-4">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold">{story.title}</h1>
-          <p className="text-sm text-gray-400">Chapter {chapterNum}</p>
-        </div>
+    supabase
+      .from("chapters")
+      .select("chapter_number")
+      .eq("story_id", storyId)
+      .eq("is_deleted", false)
+      .gt("chapter_number", chapterNum)
+      .order("chapter_number", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
 
-        <div className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <p className="text-gray-200 font-medium">
-            This chapter hasn’t manifested yet.
-          </p>
-          <p className="text-sm text-gray-400 mt-1">
-            It may not exist, it may be deleted, or it hasn’t been generated/published.
-          </p>
+    story.is_public
+      ? supabase
+          .from("novels")
+          .select("id, slug")
+          .eq("hosted_story_id", storyId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
-          <div className="mt-4 flex flex-wrap gap-3">
-            <Link
-              href={`/read/${storyId}`}
-              className="inline-flex items-center rounded-md bg-white/10 px-3 py-2 text-sm hover:bg-white/15 border border-white/10"
-            >
-              ← Back to story
-            </Link>
+  const memories = (memoryData as MemoryRow[] | null) ?? [];
+  const canonicalNovel = novelData as CanonicalNovel | null;
 
-            {last > 0 && (
+  const prev = prevRow?.chapter_number
+    ? Number(prevRow.chapter_number)
+    : null;
+
+  const next = nextRow?.chapter_number
+    ? Number(nextRow.chapter_number)
+    : null;
+
+  return (
+    <main
+      className={`mx-auto px-4 py-8 text-gray-100 ${
+        isOwner ? "max-w-5xl" : "max-w-3xl"
+      }`}
+    >
+      <header className="mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href={`/read/${storyId}`}
+            className="text-sm text-indigo-300 hover:underline"
+          >
+            {isOwner ? "← Story Management" : "← Story"}
+          </Link>
+
+          <div className="flex flex-wrap gap-2">
+            {canonicalNovel && (
               <Link
-                href={`/read/${storyId}/chapter/${last}`}
-                className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                href={`/novel/${canonicalNovel.slug}`}
+                className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-gray-300 hover:border-indigo-500 hover:text-white"
               >
-                Go to latest (Ch {last}) →
+                Novel Page
+              </Link>
+            )}
+
+            {isOwner && (
+              <Link
+                href={`/dashboard/analytics/${storyId}`}
+                className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-gray-300 hover:border-indigo-500 hover:text-white"
+              >
+                Analytics
               </Link>
             )}
           </div>
         </div>
-      </main>
-    );
-  }
 
-  // ✅ Choose best available text (draft-first + finalize flow)
-  const chapterText =
-    (chapter as any)?.final_content ??
-    (chapter as any)?.draft_content ??
-    (chapter as any)?.content ??
-    "";
+        <div className="mt-6 border-b border-white/10 pb-6">
+          <p className="text-xs uppercase tracking-[0.22em] text-indigo-300">
+            {isOwner ? "Chapter Workspace" : story.title}
+          </p>
 
-  // ✅ Fetch recent memories up to this chapter
-  const { data: mems } = await supabase
-    .from("memories")
-    .select("kind, content, chapter_number")
-    .eq("story_id", storyId)
-    .lte("chapter_number", chapterNum)
-    .order("chapter_number", { ascending: false })
-    .limit(20);
+          {isOwner && (
+            <p className="mt-1 text-sm text-gray-500">{story.title}</p>
+          )}
 
-  // ✅ Prev/Next should skip deleted chapters
-  const { data: prevRow } = await supabase
-    .from("chapters")
-    .select("chapter_number")
-    .eq("story_id", storyId)
-    .eq("is_deleted", false)
-    .lt("chapter_number", chapterNum)
-    .order("chapter_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+          <h1 className="mt-2 text-3xl font-bold text-white">
+            Chapter {chapterNum}
+            {chapter.title ? `: ${chapter.title}` : ""}
+          </h1>
 
-  const { data: nextRow } = await supabase
-    .from("chapters")
-    .select("chapter_number")
-    .eq("story_id", storyId)
-    .eq("is_deleted", false)
-    .gt("chapter_number", chapterNum)
-    .order("chapter_number", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  const prev = prevRow?.chapter_number ? Number(prevRow.chapter_number) : null;
-  const next = nextRow?.chapter_number ? Number(nextRow.chapter_number) : null;
-
-  // ✅ "is last chapter" should be computed based on next existing chapter, not story cache
-  const isLastChapter = !next;
-
-  // ✅ Increment view count (only public + not owner)
-  if (story.is_public && !isOwner) {
-    const admin = supabaseAdmin();
-    const current = Number(story.view_count ?? 0);
-    await admin.from("stories").update({ view_count: current + 1 }).eq("id", storyId);
-  }
-
-  return (
-    <main className="max-w-3xl mx-auto p-8 text-gray-200">
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold">{story.title}</h1>
-          <Link
-            href={`/read/${storyId}`}
-            className="text-sm text-indigo-400 hover:underline"
-          >
-            ← Back to story
-          </Link>
+          {isOwner && (
+            <span
+              className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-[11px] ${
+                story.is_public
+                  ? "bg-emerald-500/10 text-emerald-300"
+                  : "bg-white/10 text-gray-400"
+              }`}
+            >
+              {story.is_public ? "Published story" : "Private draft"}
+            </span>
+          )}
         </div>
-      </div>
+      </header>
 
-      <article className="prose prose-invert">
-        <h2 className="text-2xl font-semibold mb-2">
-          {(chapter as any)?.title || `Chapter ${chapterNum}`}
-        </h2>
+      {!isOwner && (
+        <article className="prose prose-invert prose-lg max-w-none">
+          {chapterText.trim().length > 0 ? (
+            <div className="whitespace-pre-wrap leading-8 text-gray-200">
+              {chapterText}
+            </div>
+          ) : (
+            <p className="text-gray-400">This chapter has no content yet.</p>
+          )}
+        </article>
+      )}
 
-        {chapterText.trim().length > 0 ? (
-          <div className="whitespace-pre-wrap leading-relaxed">{chapterText}</div>
-        ) : (
-          <p className="text-gray-400">This chapter has no content yet.</p>
-        )}
-      </article>
+      {isOwner && (
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-5 sm:p-6">
+            <div className="mb-4">
+              <p className="text-xs uppercase tracking-[0.2em] text-indigo-300">
+                Editor
+              </p>
 
-      {/* Previously on… */}
-      <section className="mt-10 border-t border-white/10 pt-6">
-        <h3 className="text-lg font-semibold mb-3">Previously on…</h3>
-        {!mems || mems.length === 0 ? (
-          <p className="text-gray-400 text-sm">No continuity notes yet.</p>
-        ) : (
-          <div className="grid sm:grid-cols-2 gap-3">
-            {mems.map((m: any, i: number) => (
-              <div key={i} className="rounded-lg bg-white/5 p-3">
-                <div className="text-xs uppercase tracking-wide text-indigo-300">
-                  {(m.kind ?? "note")} · ch {m.chapter_number}
-                </div>
-                <div className="text-sm text-gray-200">{m.content ?? ""}</div>
+              <h2 className="mt-1 text-xl font-semibold text-white">
+                Write & Edit
+              </h2>
+
+              <p className="mt-1 text-sm text-gray-400">
+                Edit the chapter directly. Optional writing assistance can live
+                alongside your normal writing workflow.
+              </p>
+            </div>
+
+            <ChapterEditor
+              storyId={storyId}
+              chapterNumber={chapterNum}
+              authorId={(story.user_id ?? story.author_id) ?? null}
+              initialContent={chapterText}
+              initialTitle={chapter.title ?? ""}
+            />
+          </section>
+
+          {memories.length > 0 && (
+            <details className="rounded-2xl border border-white/10 bg-white/5">
+              <summary className="cursor-pointer list-none p-5 text-sm font-semibold text-white">
+                Continuity Notes
+                <span className="ml-2 text-xs font-normal text-gray-500">
+                  {memories.length} recent
+                </span>
+              </summary>
+
+              <div className="grid gap-3 border-t border-white/10 p-5 sm:grid-cols-2">
+                {memories.map((memory, index) => (
+                  <div
+                    key={`${memory.chapter_number}-${memory.kind}-${index}`}
+                    className="rounded-xl border border-white/10 bg-black/25 p-3"
+                  >
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-indigo-300">
+                      {memory.kind ?? "Note"} · Chapter{" "}
+                      {memory.chapter_number ?? "—"}
+                    </p>
+
+                    <p className="mt-2 text-sm leading-relaxed text-gray-300">
+                      {memory.content ?? ""}
+                    </p>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            </details>
+          )}
 
-      {/* Author-only chapter editor */}
-      <ChapterEditor
-        storyId={storyId}
-        chapterNumber={chapterNum}
-        authorId={(story.user_id ?? story.author_id) ?? null} // ✅ supports both schemas
-        initialContent={chapterText ?? ""}
-        initialTitle={(chapter as any)?.title ?? ""}
-      />
+          <section className="rounded-2xl border border-red-500/20 bg-red-500/[0.04] p-5">
+            <p className="text-xs uppercase tracking-[0.2em] text-red-300">
+              Danger Zone
+            </p>
 
-      <nav className="flex items-center justify-between mt-8">
+            <h2 className="mt-1 text-lg font-semibold text-white">
+              Delete Chapter
+            </h2>
+
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-gray-400">
+              Remove this chapter from the story and hide it from readers.
+              Deleted chapters are preserved and can be restored later from
+              Story Management.
+            </p>
+
+            <div className="mt-4">
+              <DeleteChapterButton
+                storyId={storyId}
+                chapterNumber={chapterNum}
+              />
+            </div>
+          </section>
+        </div>
+      )}
+
+      <nav className="mt-10 grid grid-cols-2 gap-3 border-t border-white/10 pt-6">
         <div>
           {prev ? (
             <Link
               href={`/read/${storyId}/chapter/${prev}`}
-              className="text-gray-300 hover:text-white"
+              className="inline-flex rounded-md border border-white/10 bg-black/30 px-4 py-2 text-sm text-gray-300 hover:border-indigo-500 hover:text-white"
             >
-              ← Previous
+              ← Chapter {prev}
             </Link>
           ) : (
-            <span className="text-gray-600 select-none">← Previous</span>
+            <span className="inline-flex px-4 py-2 text-sm text-gray-600">
+              Beginning
+            </span>
           )}
         </div>
 
-        <div>
+        <div className="text-right">
           {next ? (
             <Link
               href={`/read/${storyId}/chapter/${next}`}
-              className="text-gray-300 hover:text-white"
+              className="inline-flex rounded-md border border-white/10 bg-black/30 px-4 py-2 text-sm text-gray-300 hover:border-indigo-500 hover:text-white"
             >
-              Next →
+              Chapter {next} →
             </Link>
           ) : (
-            <span className="text-gray-600 select-none">Next →</span>
+            <span className="inline-flex px-4 py-2 text-sm text-gray-600">
+              Latest chapter
+            </span>
           )}
         </div>
       </nav>
-
-      {/* Generate-next button when you're at the end */}
-      {isLastChapter && (
-        <section className="mt-10 border-t border-white/10 pt-6">
-          <h3 className="text-lg font-semibold mb-3">Continue the saga</h3>
-          <GenerateButton
-            storyId={storyId}
-            nextNumber={(Number(story.last_chapter_number ?? chapterNum) || chapterNum) + 1}
-          />
-        </section>
-      )}
     </main>
   );
 }
