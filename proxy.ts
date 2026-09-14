@@ -1,4 +1,3 @@
-// proxy.ts
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
@@ -86,6 +85,24 @@ function isPublicPath(pathname: string) {
   if (
     pathname === "/beta" ||
     pathname.startsWith("/beta/")
+  ) {
+    return true;
+  }
+
+  /*
+   * PUBLIC LEGAL PAGES
+   */
+
+  if (
+    pathname === "/copyright" ||
+    pathname.startsWith("/copyright/")
+  ) {
+    return true;
+  }
+
+  if (
+    pathname === "/dmca" ||
+    pathname.startsWith("/dmca/")
   ) {
     return true;
   }
