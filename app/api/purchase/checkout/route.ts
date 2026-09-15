@@ -4,6 +4,11 @@ import { getSupabaseServer } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
+const PURCHASES_ENABLED = process.env.PURCHASES_ENABLED === "true";
+const OWNER_EMAIL = (process.env.BETA_OWNER_EMAIL || "")
+  .trim()
+  .toLowerCase();
+
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY?.trim();
   if (!key) throw new Error("Missing STRIPE_SECRET_KEY");
@@ -11,10 +16,11 @@ function getStripe() {
 }
 
 function firstEnv(...keys: string[]) {
-  for (const k of keys) {
-    const v = process.env[k];
-    if (v && v.trim().length > 0) return v.trim();
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value && value.trim().length > 0) return value.trim();
   }
+
   return undefined;
 }
 
@@ -32,7 +38,10 @@ function priceIdForPack(packId: string): string | undefined {
         "STRIPE_PRICE_HANDFUL"
       );
     case "small_pile":
-      return firstEnv("STRIPE_PRICE_ID_SMALL_PILE", "STRIPE_PRICE_SMALL_PILE");
+      return firstEnv(
+        "STRIPE_PRICE_ID_SMALL_PILE",
+        "STRIPE_PRICE_SMALL_PILE"
+      );
     case "pouch":
       return firstEnv("STRIPE_PRICE_ID_POUCH", "STRIPE_PRICE_POUCH");
     case "chest":
@@ -46,7 +55,7 @@ function priceIdForPack(packId: string): string | undefined {
 
 function getBaseUrl() {
   const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-  if (explicit) return explicit;
+  if (explicit) return explicit.replace(/\/$/, "");
 
   const vercel = process.env.VERCEL_URL?.trim();
   if (vercel) return `https://${vercel}`;
@@ -56,7 +65,15 @@ function getBaseUrl() {
 
 export async function POST(req: Request) {
   try {
-    const stripe = getStripe();
+    // Purchases default to disabled and no Stripe operation occurs unless
+    // the feature is deliberately enabled in the server environment.
+    if (!PURCHASES_ENABLED) {
+      return NextResponse.json(
+        { error: "Spirit Stone purchases are currently unavailable" },
+        { status: 503 }
+      );
+    }
+
     const supabase = getSupabaseServer();
 
     const authHeader = req.headers.get("authorization") || "";
@@ -65,64 +82,108 @@ export async function POST(req: Request) {
       : "";
 
     if (!token) {
-      return NextResponse.json({ error: "Please log in to continue" }, { status: 401 });
-    }
-
-    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userData?.user) {
-      return NextResponse.json({ error: "Please log in to continue" }, { status: 401 });
-    }
-
-    const emailLower = userData.user.email?.toLowerCase().trim();
-    if (!emailLower) {
-      return NextResponse.json({ error: "Account email missing." }, { status: 401 });
-    }
-
-    const { data: allow } = await supabase
-      .from("beta_allowlist")
-      .select("email")
-      .eq("email", emailLower)
-      .maybeSingle();
-
-    if (!allow) {
       return NextResponse.json(
-        { error: "This is a closed beta. Please request an invite to continue." },
-        { status: 403 }
+        { error: "Please log in to continue" },
+        { status: 401 }
+      );
+    }
+
+    const { data: userData, error: userError } =
+      await supabase.auth.getUser(token);
+
+    if (userError || !userData?.user) {
+      return NextResponse.json(
+        { error: "Please log in to continue" },
+        { status: 401 }
       );
     }
 
     const user = userData.user;
-    const userId = user.id;
-    const email = user.email ?? undefined;
+    const emailLower = (user.email || "").trim().toLowerCase();
 
-    const body = await req.json().catch(() => ({} as any));
-    const packId = normalizePackId(body?.packId);
-
-    if (!packId) {
-      return NextResponse.json({ error: "Missing packId" }, { status: 400 });
-    }
-
-    const priceId = priceIdForPack(packId);
-    if (!priceId) {
+    if (!emailLower) {
       return NextResponse.json(
-        {
-          error:
-            `Missing Stripe price id for pack '${packId}'. ` +
-            `Set STRIPE_PRICE_ID_* env vars on Vercel.`,
-          packId,
-        },
-        { status: 500 }
+        { error: "Account email is unavailable" },
+        { status: 403 }
       );
     }
 
-    // Find or create Stripe customer
+    const isOwner = Boolean(OWNER_EMAIL && emailLower === OWNER_EMAIL);
+
+    if (!isOwner) {
+      const { data: allowlistRow, error: allowlistError } =
+        await supabase
+          .from("beta_allowlist")
+          .select("email")
+          .eq("email", emailLower)
+          .maybeSingle();
+
+      if (allowlistError) {
+        console.error(
+          "checkout: allowlist lookup failed",
+          allowlistError
+        );
+
+        return NextResponse.json(
+          { error: "Could not verify beta access" },
+          { status: 503 }
+        );
+      }
+
+      if (!allowlistRow?.email) {
+        return NextResponse.json(
+          { error: "Beta access required" },
+          { status: 403 }
+        );
+      }
+    }
+
+    const body = await req.json().catch(() => null);
+    const packId = normalizePackId(body?.packId);
+
+    if (!packId) {
+      return NextResponse.json(
+        { error: "Missing packId" },
+        { status: 400 }
+      );
+    }
+
+    const priceId = priceIdForPack(packId);
+
+    if (!priceId) {
+      console.error("checkout: missing price configuration", packId);
+
+      return NextResponse.json(
+        { error: "This purchase option is unavailable" },
+        { status: 503 }
+      );
+    }
+
+    const stripe = getStripe();
+    const userId = user.id;
+    const email = user.email ?? undefined;
+
+    // Find or create the Stripe customer associated with this user.
     let stripeCustomerId: string | null = null;
 
-    const { data: existingCustomer } = await supabase
-      .from("stripe_customers")
-      .select("stripe_customer_id")
-      .eq("user_id", userId)
-      .maybeSingle();
+    const { data: existingCustomer, error: customerLookupError } =
+      await supabase
+        .from("stripe_customers")
+        .select("stripe_customer_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+    if (customerLookupError) {
+      console.error(
+        "checkout: customer lookup failed",
+        customerLookupError
+      );
+
+      return NextResponse.json(
+        { error: "Could not initialize checkout" },
+        { status: 500 }
+      );
+    }
 
     if (existingCustomer?.stripe_customer_id) {
       stripeCustomerId = existingCustomer.stripe_customer_id;
@@ -134,10 +195,24 @@ export async function POST(req: Request) {
 
       stripeCustomerId = customer.id;
 
-      await supabase.from("stripe_customers").upsert({
-        user_id: userId,
-        stripe_customer_id: stripeCustomerId,
-      });
+      const { error: customerSaveError } = await supabase
+        .from("stripe_customers")
+        .upsert({
+          user_id: userId,
+          stripe_customer_id: stripeCustomerId,
+        });
+
+      if (customerSaveError) {
+        console.error(
+          "checkout: customer save failed",
+          customerSaveError
+        );
+
+        return NextResponse.json(
+          { error: "Could not initialize checkout" },
+          { status: 500 }
+        );
+      }
     }
 
     const baseUrl = getBaseUrl();
@@ -150,14 +225,15 @@ export async function POST(req: Request) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${baseUrl}/store?success=1`,
       cancel_url: `${baseUrl}/store?canceled=1`,
-      metadata: { userId, packId }, // ✅ must match webhook expectations
+      metadata: { userId, packId },
     });
 
     return NextResponse.json({ url: session.url }, { status: 200 });
-  } catch (err: any) {
-    console.error("checkout fatal:", err);
+  } catch (error) {
+    console.error("checkout fatal:", error);
+
     return NextResponse.json(
-      { error: err?.message || "Unknown error" },
+      { error: "Could not initialize checkout" },
       { status: 500 }
     );
   }
