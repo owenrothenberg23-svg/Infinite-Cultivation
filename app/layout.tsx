@@ -7,9 +7,28 @@ import { ToastProvider } from "@/components/ui/toast";
 import { ModeProvider } from "@/components/ModeProvider";
 
 export const metadata: Metadata = {
-  title: "Infinite Cultivation",
+  metadataBase: new URL("https://infinite-cultivation-28ue.vercel.app"),
+  title: {
+    default: "Infinite Cultivation",
+    template: "%s | Infinite Cultivation",
+  },
   description:
     "Discover, read, and create cultivation novels on Infinite Cultivation.",
+  applicationName: "Infinite Cultivation",
+  openGraph: {
+    type: "website",
+    siteName: "Infinite Cultivation",
+    title: "Infinite Cultivation",
+    description:
+      "Discover, read, and create cultivation novels on Infinite Cultivation.",
+    url: "/",
+  },
+  twitter: {
+    card: "summary",
+    title: "Infinite Cultivation",
+    description:
+      "Discover, read, and create cultivation novels on Infinite Cultivation.",
+  },
 };
 
 export default function RootLayout({
@@ -40,9 +59,7 @@ export default function RootLayout({
 
               <footer className="border-t border-white/10 bg-black/20">
                 <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-6 text-sm text-gray-400 sm:flex-row sm:items-center sm:justify-between">
-                  <p>
-                    © {new Date().getFullYear()} Infinite Cultivation
-                  </p>
+                  <p>© {new Date().getFullYear()} Infinite Cultivation</p>
 
                   <nav
                     aria-label="Legal links"
