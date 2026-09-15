@@ -147,12 +147,19 @@ export default async function NovelPage({
 
   if (!novel) return notFound();
 
-  await admin
-    .from("novels")
-    .update({
-      view_count: (novel.view_count ?? 0) + 1,
-    })
-    .eq("id", novel.id);
+  const { error: viewCountError } = await admin.rpc(
+    "increment_novel_view_count",
+    {
+      p_novel_id: novel.id,
+    }
+  );
+
+  if (viewCountError) {
+    console.warn(
+      "Could not increment novel view count:",
+      viewCountError
+    );
+  }
 
   const ssr = await supabaseServerClient();
 
