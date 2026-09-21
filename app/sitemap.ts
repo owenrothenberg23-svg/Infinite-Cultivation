@@ -2,7 +2,9 @@
 import type { MetadataRoute } from "next";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = "https://infinite-cultivation-28ue.vercel.app";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://infinitecultivation.com";
+
   const lastModified = new Date();
 
   return [
